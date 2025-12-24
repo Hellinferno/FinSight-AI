@@ -28,7 +28,7 @@ export const useStore = create<AppState>((set) => ({
   user: null,
   setUser: (user) => set({ user }),
 
-  currentView: AppView.DASHBOARD,
+  currentView: AppView.LANDING,
   setView: (view) => set({ currentView: view }),
 
   scenarios: [DEFAULT_SCENARIO, OPTIMISTIC_SCENARIO, PESSIMISTIC_SCENARIO],
