@@ -48,7 +48,6 @@ export interface ResearchResponse {
 }
 
 export enum AppView {
-  LANDING = 'LANDING',
   DASHBOARD = 'DASHBOARD',
   VALUATION = 'VALUATION',
   RESEARCH = 'RESEARCH',

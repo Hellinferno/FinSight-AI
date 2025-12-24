@@ -6,7 +6,6 @@ import { MarketResearch } from './components/Research/MarketResearch';
 import { AIAnalyst } from './components/Analysis/AIAnalyst';
 import { DataConnectors } from './components/Data/DataConnectors';
 import { DocumentAnalysis } from './components/Documents/DocumentAnalysis';
-import { LandingPage } from './components/Landing/LandingPage';
 import { AppView } from './types';
 import { Menu } from 'lucide-react';
 import { useStore } from './store/useStore';
@@ -22,7 +21,6 @@ function App() {
 
   const renderView = () => {
     switch (currentView) {
-      case AppView.LANDING: return <LandingPage onEnter={() => setCurrentView(AppView.DASHBOARD)} />;
       case AppView.DASHBOARD: return <DashboardView />;
       case AppView.VALUATION: return <ValuationTools />;
       case AppView.RESEARCH: return <MarketResearch />;
@@ -32,11 +30,6 @@ function App() {
       default: return <DashboardView />;
     }
   };
-
-  // If on Landing Page, render ONLY the landing page (no sidebar)
-  if (currentView === AppView.LANDING) {
-      return <LandingPage onEnter={() => setCurrentView(AppView.DASHBOARD)} />;
-  }
 
   return (
     <div className="flex h-screen bg-slate-50 dark:bg-slate-950 overflow-hidden transition-colors duration-300">
