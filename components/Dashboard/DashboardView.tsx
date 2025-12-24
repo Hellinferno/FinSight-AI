@@ -133,7 +133,7 @@ export const DashboardView: React.FC = () => {
                 <span className="flex items-center gap-1 text-xs text-slate-500"><div className="w-2 h-2 rounded-full bg-blue-500"></div> Net Profit</span>
             </div>
           </div>
-          <div className="h-80">
+          <div className="h-80 w-full min-w-0">
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart data={currentRevenueData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
                 <defs>
@@ -163,7 +163,7 @@ export const DashboardView: React.FC = () => {
         {/* Expense Breakdown */}
         <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm flex flex-col">
             <h3 className="text-lg font-bold text-slate-800 mb-6">Expense Allocation</h3>
-            <div className="flex-1 min-h-[200px] relative">
+            <div className="h-80 w-full min-w-0 relative">
                 <ResponsiveContainer width="100%" height="100%">
                     <PieChart>
                         <Pie

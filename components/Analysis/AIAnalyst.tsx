@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, User, Bot, Loader2, Sparkles, Database } from 'lucide-react';
+import { Send, User, Bot, Loader2, Database } from 'lucide-react';
 import { GeminiService } from '../../services/geminiService';
 import { FmpService } from '../../services/fmpService';
 import { ChatMessage } from '../../types';
@@ -10,7 +10,7 @@ export const AIAnalyst: React.FC = () => {
     {
         id: '1',
         role: 'model',
-        text: 'Hello, I am your Financial Analyst Assistant. I have access to real-time market data. Ask me about stock prices, company profiles, or general financial concepts.',
+        text: 'I am your Financial Agent. I can fetch real-time data for any public company. Try "Check AAPL price" or "Analyze Microsoft".',
         timestamp: new Date()
     }
   ]);
@@ -19,100 +19,77 @@ export const AIAnalyst: React.FC = () => {
   const [agentAction, setAgentAction] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  };
-
-  useEffect(() => {
-    scrollToBottom();
-  }, [messages, agentAction]);
+  useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages, agentAction]);
 
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!input.trim() || loading) return;
 
-    const userMsg: ChatMessage = {
-        id: Date.now().toString(),
-        role: 'user',
-        text: input,
-        timestamp: new Date()
-    };
-
+    const userMsg: ChatMessage = { id: Date.now().toString(), role: 'user', text: input, timestamp: new Date() };
     setMessages(prev => [...prev, userMsg]);
     setInput('');
     setLoading(true);
-    setAgentAction(null);
 
     try {
-        // --- AGENTIC LAYER: Detect Ticker & Fetch Data ---
-        let contextInjection = "";
-        
-        // Simple regex to find potential tickers (e.g. AAPL, MSFT) - 1 to 5 uppercase letters
-        // We use a simplified heuristic here for the demo.
-        const potentialTickers = userMsg.text.match(/\b[A-Z]{2,5}\b/g);
-
-        if (potentialTickers && potentialTickers.length > 0) {
-            const ticker = potentialTickers[0]; // Take the first one found
-            setAgentAction(`Fetching real-time data for ${ticker}...`);
-            
-            try {
-                // Fetch Profile and Financials
-                const [profile, financials] = await Promise.all([
-                     FmpService.getCompanyProfile(ticker).catch(() => []),
-                     FmpService.getIncomeStatement(ticker, 1).catch(() => [])
-                ]);
-
-                if (profile.length > 0) {
-                    const p = profile[0];
-                    const f = financials.length > 0 ? financials[0] : null;
-                    
-                    contextInjection = `
-                    [SYSTEM DATA INJECTION]
-                    The user is asking about ${ticker}. Here is the real-time data from FMP API:
-                    - Price: $${p.price}
-                    - Market Cap: $${p.mktCap}
-                    - Beta: ${p.beta}
-                    - CEO: ${p.ceo}
-                    - Description: ${p.description}
-                    - Industry: ${p.industry}
-                    ${f ? `- Last Reported Revenue: ${f.revenue}` : ''}
-                    ${f ? `- Last Reported Net Income: ${f.netIncome}` : ''}
-                    
-                    Use this data to answer the user's question accurately.
-                    [/SYSTEM DATA INJECTION]
-                    `;
-                }
-            } catch (err) {
-                console.warn("Agent failed to fetch data", err);
-            }
-        }
-        // ------------------------------------------------
-
-        // Convert internal message format to history format for service
-        // Append context injection to the last user message for the LLM
         const history = messages.map(m => ({ role: m.role, text: m.text }));
         
-        // Pass the modified prompt with data injection to Gemini
-        const finalPrompt = contextInjection ? `${userMsg.text}\n\n${contextInjection}` : userMsg.text;
+        // 1. Ask Gemini (It decides if it needs a tool)
+        const response: any = await GeminiService.startFinancialChat(history, userMsg.text);
 
-        const responseText = await GeminiService.analyzeFinancialQuery(history, finalPrompt);
+        if (response.type === 'TOOL_CALL' && response.functionName === 'get_realtime_stock_data') {
+            const ticker = (response.args as any).ticker;
+            setAgentAction(`Fetching live data for ${ticker}...`);
 
-        const botMsg: ChatMessage = {
-            id: (Date.now() + 1).toString(),
+            // 2. Execute Tool (Fetch Data)
+            try {
+                const [profile, financials] = await Promise.all([
+                    FmpService.getCompanyProfile(ticker).catch(() => []),
+                    FmpService.getIncomeStatement(ticker, 1).catch(() => [])
+                ]);
+
+                const toolData = {
+                    profile: profile[0] || "Not found",
+                    financials: financials[0] || "Not found"
+                };
+
+                // 3. Send Data back to Gemini for final answer
+                const finalAnswer = await GeminiService.sendToolResultToChat(history, 'get_realtime_stock_data', toolData);
+                
+                setMessages(prev => [...prev, {
+                    id: Date.now().toString(),
+                    role: 'model',
+                    text: finalAnswer || "I retrieved the data but couldn't generate a summary.",
+                    timestamp: new Date()
+                }]);
+
+            } catch (err) {
+                setMessages(prev => [...prev, {
+                    id: Date.now().toString(),
+                    role: 'model',
+                    text: "Failed to fetch stock data. Please check the ticker.",
+                    timestamp: new Date(),
+                    isError: true
+                }]);
+            }
+        } else {
+            // Standard Text Response
+            setMessages(prev => [...prev, {
+                id: Date.now().toString(),
+                role: 'model',
+                text: response.text || "I didn't understand that.",
+                timestamp: new Date()
+            }]);
+        }
+    } catch (error: any) {
+        console.error(error);
+        const errorMessage = error?.message || "System Error: Please check API configurations.";
+        setMessages(prev => [...prev, {
+            id: Date.now().toString(),
             role: 'model',
-            text: responseText,
-            timestamp: new Date()
-        };
-        setMessages(prev => [...prev, botMsg]);
-    } catch (error) {
-        const errorMsg: ChatMessage = {
-            id: (Date.now() + 1).toString(),
-            role: 'model',
-            text: "I encountered an error connecting to the analysis engine. Please try again.",
+            text: errorMessage,
             timestamp: new Date(),
             isError: true
-        };
-        setMessages(prev => [...prev, errorMsg]);
+        }]);
     } finally {
         setLoading(false);
         setAgentAction(null);
@@ -120,18 +97,19 @@ export const AIAnalyst: React.FC = () => {
   };
 
   return (
-    <div className="flex flex-col h-full bg-slate-50 relative">
+     <div className="flex flex-col h-full bg-slate-50 relative">
       <header className="px-8 py-6 border-b border-slate-200 bg-white">
         <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
             AI Analyst
             <span className="text-xs font-normal text-emerald-700 bg-emerald-100 border border-emerald-200 px-2 py-0.5 rounded-full flex items-center gap-1">
-                <Sparkles className="w-3 h-3"/> Agentic Mode
+                <Database className="w-3 h-3"/> Agent Active
             </span>
         </h1>
       </header>
-
+      
+      {/* Messages Area */}
       <div className="flex-1 overflow-y-auto p-8 space-y-6">
-        {messages.map((msg) => (
+        {messages.map((msg, index) => (
             <div key={msg.id} className={`flex gap-4 max-w-4xl mx-auto ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}>
                 <div className={`w-10 h-10 rounded-full flex-shrink-0 flex items-center justify-center ${
                     msg.role === 'user' ? 'bg-slate-200 text-slate-600' : 'bg-emerald-600 text-white'
@@ -146,7 +124,11 @@ export const AIAnalyst: React.FC = () => {
                             ? 'bg-rose-50 text-rose-800 border border-rose-200 rounded-tl-none'
                             : 'bg-white text-slate-800 border border-slate-200 rounded-tl-none'
                     }`}>
-                        <ReactMarkdown>{msg.text}</ReactMarkdown>
+                        {msg.role === 'model' && index === messages.length - 1 && !loading ? (
+                            <Typewriter text={msg.text} />
+                        ) : (
+                            <ReactMarkdown>{msg.text}</ReactMarkdown>
+                        )}
                     </div>
                     <span className="text-xs text-slate-400 mt-2 px-1">
                         {msg.timestamp.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
@@ -158,7 +140,7 @@ export const AIAnalyst: React.FC = () => {
         {/* Agent Action Indicator */}
         {agentAction && (
              <div className="flex gap-4 max-w-4xl mx-auto items-center animate-fadeIn">
-                 <div className="w-10 flex-shrink-0"></div> {/* Spacer */}
+                 <div className="w-10 flex-shrink-0"></div>
                  <div className="flex items-center gap-2 text-xs font-medium text-emerald-600 bg-emerald-50 px-3 py-1.5 rounded-full border border-emerald-100">
                      <Database className="w-3 h-3 animate-pulse" />
                      {agentAction}
@@ -173,11 +155,7 @@ export const AIAnalyst: React.FC = () => {
                 </div>
                 <div className="bg-white border border-slate-200 px-6 py-4 rounded-2xl rounded-tl-none flex items-center gap-2">
                     <span className="text-sm text-slate-500">Thinking</span>
-                    <div className="flex gap-1">
-                        <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{animationDelay: '0ms'}}></span>
-                        <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{animationDelay: '150ms'}}></span>
-                        <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{animationDelay: '300ms'}}></span>
-                    </div>
+                    <Loader2 className="w-4 h-4 animate-spin text-slate-400"/>
                 </div>
             </div>
         )}
@@ -191,7 +169,7 @@ export const AIAnalyst: React.FC = () => {
                     type="text"
                     value={input}
                     onChange={(e) => setInput(e.target.value)}
-                    placeholder="Try: 'What is the current price of AAPL?' or 'Explain EBITDA'"
+                    placeholder="Try: 'Analyze NVDA stock' or 'Compare AAPL and MSFT'"
                     className="w-full pl-6 pr-14 py-4 rounded-xl bg-slate-50 border border-slate-200 focus:bg-white focus:ring-2 focus:ring-emerald-500 focus:border-transparent outline-none transition-all"
                 />
                 <button 
@@ -209,4 +187,34 @@ export const AIAnalyst: React.FC = () => {
       </div>
     </div>
   );
+};
+
+// Improved Typewriter Component
+const Typewriter: React.FC<{ text: string; onComplete?: () => void }> = ({ text, onComplete }) => {
+    const [displayedText, setDisplayedText] = useState('');
+    const indexRef = useRef(0); // Use Ref to track index without triggering re-renders
+
+    useEffect(() => {
+        // Reset if text changes
+        setDisplayedText('');
+        indexRef.current = 0;
+
+        const timer = setInterval(() => {
+            // Calculate next index
+            const currentIndex = indexRef.current;
+            
+            if (currentIndex < text.length) {
+                // Append next character safely
+                setDisplayedText((prev) => prev + text.charAt(currentIndex));
+                indexRef.current += 1;
+            } else {
+                clearInterval(timer);
+                if (onComplete) onComplete();
+            }
+        }, 15); // Slightly slower (15ms) for smoother effect
+
+        return () => clearInterval(timer); // Cleanup prevents "ghost" typing
+    }, [text]); // Only restart if the full text changes
+
+    return <ReactMarkdown>{displayedText}</ReactMarkdown>;
 };

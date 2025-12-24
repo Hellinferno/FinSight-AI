@@ -1,4 +1,5 @@
-const API_KEY = 'zKtKqCr1VYJ0LG4csL4bxq9ZtaYeDKzo';
+// Safely access environment variables
+const API_KEY = import.meta.env?.VITE_FMP_API_KEY;
 const BASE_URL = 'https://financialmodelingprep.com/api/v3';
 
 export interface FMPProfile {
@@ -85,6 +86,7 @@ export const FmpService = {
    * Fetches the company profile (Price, Beta, Description, etc.)
    */
   async getCompanyProfile(ticker: string): Promise<FMPProfile[]> {
+    if (!API_KEY) throw new Error("Missing FMP API Key in .env.local (VITE_FMP_API_KEY)");
     try {
       const response = await fetch(`${BASE_URL}/profile/${ticker.toUpperCase()}?apikey=${API_KEY}`);
       if (!response.ok) throw new Error(`FMP API Error: ${response.statusText}`);
@@ -101,6 +103,7 @@ export const FmpService = {
    * limit=5 gets the last 5 years.
    */
   async getIncomeStatement(ticker: string, limit = 5): Promise<FMPIncomeStatement[]> {
+    if (!API_KEY) throw new Error("Missing FMP API Key in .env.local (VITE_FMP_API_KEY)");
     try {
       const response = await fetch(`${BASE_URL}/income-statement/${ticker.toUpperCase()}?limit=${limit}&apikey=${API_KEY}`);
       if (!response.ok) throw new Error(`FMP API Error: ${response.statusText}`);

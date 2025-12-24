@@ -38,8 +38,10 @@ export const MarketResearch: React.FC = () => {
       // 2. Perform Research
       const result = await GeminiService.conductResearch(query);
       setData(result);
-    } catch (err) {
-      setError("Failed to fetch market insights. Please check your API configuration.");
+    } catch (err: any) {
+      console.error(err);
+      // Display the specific error message (e.g., "API Key not found") if available
+      setError(err.message || "Failed to fetch market insights. Please check your API configuration.");
     } finally {
       setLoading(false);
     }
@@ -76,9 +78,12 @@ export const MarketResearch: React.FC = () => {
          </div>
 
          {error && (
-             <div className="bg-rose-50 border border-rose-200 text-rose-700 p-4 rounded-lg flex items-center gap-3 mb-6">
-                 <AlertCircle className="w-5 h-5"/>
-                 {error}
+             <div className="bg-rose-50 border border-rose-200 text-rose-700 p-4 rounded-lg flex items-center gap-3 mb-6 animate-fadeIn">
+                 <AlertCircle className="w-5 h-5 flex-shrink-0"/>
+                 <div>
+                    <p className="font-medium">Error</p>
+                    <p className="text-sm">{error}</p>
+                 </div>
              </div>
          )}
 

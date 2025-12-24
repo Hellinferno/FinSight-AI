@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Plus, Trash2, Calculator, RefreshCw, Save, Copy, TrendingUp, TrendingDown, Layers, Download, Search, Loader2 } from 'lucide-react';
+import { Plus, Trash2, Calculator, RefreshCw, Save, Copy, TrendingUp, TrendingDown, Layers, Download, Search, Loader2, Cloud, CloudOff } from 'lucide-react';
 import { CashFlowData, ValuationResult, Scenario } from '../../types';
 import { DEFAULT_SCENARIO, OPTIMISTIC_SCENARIO, PESSIMISTIC_SCENARIO } from '../../constants';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { FmpService, FMPIncomeStatement } from '../../services/fmpService';
+import { supabase } from '../../lib/supabaseClient';
 
 // Helper for formatting large numbers
 const formatLargeNumber = (num: number) => {
@@ -13,18 +14,112 @@ const formatLargeNumber = (num: number) => {
     return `$${num.toFixed(0)}`;
 };
 
+const STORAGE_KEY = 'finsight_scenarios_v1';
+
 export const ValuationTools: React.FC = () => {
+  // Initialize state with default, then attempt to load from storage
   const [scenarios, setScenarios] = useState<Scenario[]>([DEFAULT_SCENARIO, OPTIMISTIC_SCENARIO, PESSIMISTIC_SCENARIO]);
   const [activeScenarioId, setActiveScenarioId] = useState<string>(DEFAULT_SCENARIO.id);
   const [projectionYears, setProjectionYears] = useState<number>(5);
+  const [isLoaded, setIsLoaded] = useState(false);
+  const [user, setUser] = useState<any>(null);
+  const [isSaving, setIsSaving] = useState(false);
   
   // FMP Integration State
   const [tickerInput, setTickerInput] = useState('');
   const [isLoadingTicker, setIsLoadingTicker] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
 
+  // 1. Fetch User & Load Scenarios on Mount
+  useEffect(() => {
+    // Cast to any to resolve TS errors where SupabaseAuthClient type definition is missing methods
+    (supabase.auth as any).getUser().then(({ data }: any) => {
+        const user = data?.user;
+        setUser(user);
+        if (user) loadSavedScenarios(user.id);
+    }).catch((err: any) => {
+        console.warn("Supabase auth check failed (ValuationTools):", err);
+    });
+
+    // Check LocalStorage as fallback or initial load
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (saved) {
+        try {
+            const parsed = JSON.parse(saved);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+                // We keep defaults + local for now, cloud load will append/merge
+                setScenarios(parsed);
+            }
+        } catch (e) {
+            console.error("Failed to load saved scenarios", e);
+        }
+    }
+    setIsLoaded(true);
+  }, []);
+
+  // Save to LocalStorage whenever scenarios change (Auto-save local)
+  useEffect(() => {
+      if (isLoaded) {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(scenarios));
+      }
+  }, [scenarios, isLoaded]);
+
+  const loadSavedScenarios = async (userId: string) => {
+      const { data, error } = await supabase
+        .from('scenarios')
+        .select('*')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: true });
+      
+      if (data && data.length > 0) {
+          // Map DB format to App format
+          const dbScenarios: Scenario[] = data.map((d: any) => ({
+              id: d.id, // Using UUID from DB
+              name: d.name,
+              drivers: d.drivers
+          }));
+          
+          setScenarios(prev => {
+              // Simple merge strategy: Add cloud scenarios if they don't exist by ID
+              // Note: This might duplicate if ID schemes differ (UUID vs 'default'). 
+              // Ideally, you'd dedup by name or have a robust sync strategy.
+              // For Phase 2, we just append cloud scenarios to the list.
+              const existingIds = new Set(prev.map(s => s.id));
+              const newFromCloud = dbScenarios.filter(s => !existingIds.has(s.id));
+              return [...prev, ...newFromCloud];
+          });
+      }
+  };
+
+  const saveScenarioToCloud = async () => {
+      if (!user) {
+          alert("Please sign in from the sidebar to save scenarios to the cloud.");
+          return;
+      }
+      setIsSaving(true);
+      
+      // We insert a new record for the current active scenario
+      const { error } = await supabase
+        .from('scenarios')
+        .insert({
+            user_id: user.id,
+            name: activeScenario.name,
+            drivers: activeScenario.drivers
+        });
+
+      setIsSaving(false);
+
+      if (error) {
+          alert("Failed to save: " + error.message);
+      } else {
+          // Ideally, we'd reload to get the real UUID, but for now just notify
+          alert("Scenario saved to cloud successfully!");
+          loadSavedScenarios(user.id); // Refresh list
+      }
+  };
+
   const activeScenario = useMemo(() => 
-    scenarios.find(s => s.id === activeScenarioId) || DEFAULT_SCENARIO, 
+    scenarios.find(s => s.id === activeScenarioId) || scenarios[0] || DEFAULT_SCENARIO, 
     [scenarios, activeScenarioId]
   );
 
@@ -33,8 +128,8 @@ export const ValuationTools: React.FC = () => {
     const flows: CashFlowData[] = [];
     const { baseRevenue, revenueGrowth, cogsMargin, taxRate, discountRate } = scenario.drivers;
     
-    // Year 0 (Initial Investment placeholder - usually calculated separately, hardcoded for model simplicity here)
-    const initialInvestment = - (baseRevenue * 0.15); // Assume 15% of revenue as initial investment/working capital
+    // Year 0 (Initial Investment placeholder)
+    const initialInvestment = - (baseRevenue * 0.15); 
     flows.push({ year: 0, revenue: 0, expenses: 0, cashFlow: initialInvestment });
 
     let currentRevenue = baseRevenue;
@@ -107,6 +202,13 @@ export const ValuationTools: React.FC = () => {
     setActiveScenarioId(newId);
   };
 
+  const deleteScenario = (id: string) => {
+      if (scenarios.length <= 1) return;
+      const newScenarios = scenarios.filter(s => s.id !== id);
+      setScenarios(newScenarios);
+      setActiveScenarioId(newScenarios[0].id);
+  }
+
   const handleImportTicker = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!tickerInput.trim()) return;
@@ -174,13 +276,13 @@ export const ValuationTools: React.FC = () => {
                     <Calculator className="w-8 h-8 text-emerald-600" />
                     Scenario Planning & Valuation
                 </h1>
-                <p className="text-slate-500 mt-1">
-                    Driver-based modeling. Import real ticker data to auto-generate assumptions.
+                <p className="text-slate-500 mt-1 flex items-center gap-2">
+                    {user ? <span className="text-emerald-600 flex items-center gap-1"><Cloud className="w-3 h-3"/> Cloud Sync Active</span> : <span className="text-slate-400 flex items-center gap-1"><CloudOff className="w-3 h-3"/> Local Mode (Sign in to sync)</span>}
                 </p>
             </div>
             
-            {/* Ticker Import Form */}
-            <div className="flex gap-2 items-start">
+            {/* Action Bar */}
+            <div className="flex gap-2 items-start flex-wrap">
                  <form onSubmit={handleImportTicker} className="flex gap-2">
                     <div className="relative">
                         <input 
@@ -188,7 +290,7 @@ export const ValuationTools: React.FC = () => {
                             value={tickerInput}
                             onChange={(e) => setTickerInput(e.target.value)}
                             placeholder="Import Ticker (e.g. AAPL)"
-                            className="pl-9 pr-4 py-2 rounded-lg border border-slate-300 focus:ring-2 focus:ring-emerald-500 focus:border-transparent outline-none w-64 text-sm"
+                            className="pl-9 pr-4 py-2 rounded-lg border border-slate-300 focus:ring-2 focus:ring-emerald-500 focus:border-transparent outline-none w-48 lg:w-64 text-sm"
                         />
                         <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
                     </div>
@@ -203,6 +305,14 @@ export const ValuationTools: React.FC = () => {
                  </form>
                  <button onClick={createScenario} className="flex items-center gap-2 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 px-4 py-2 rounded-lg text-sm font-medium transition-colors">
                     <Copy className="w-4 h-4" /> Duplicate
+                </button>
+                <button 
+                    onClick={saveScenarioToCloud}
+                    disabled={isSaving || !user}
+                    className="flex items-center gap-2 bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-emerald-700 disabled:opacity-50 disabled:bg-slate-400 transition-colors"
+                >
+                    {isSaving ? <Loader2 className="w-4 h-4 animate-spin"/> : <Save className="w-4 h-4" />} 
+                    Save to Cloud
                 </button>
             </div>
         </header>
@@ -220,24 +330,36 @@ export const ValuationTools: React.FC = () => {
                 
                 {/* Scenario Selector */}
                 <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
-                    <label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 block">Active Scenario</label>
+                    <label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 flex justify-between">
+                        <span>Active Scenario</span>
+                        <span className="text-emerald-600 flex items-center gap-1"><Save className="w-3 h-3"/> Auto-Saving (Local)</span>
+                    </label>
                     <div className="space-y-2 max-h-60 overflow-y-auto">
                         {scenarios.map(s => (
-                            <button
-                                key={s.id}
-                                onClick={() => setActiveScenarioId(s.id)}
-                                className={`w-full flex items-center justify-between px-4 py-3 rounded-lg border transition-all ${
-                                    activeScenarioId === s.id 
-                                    ? 'bg-emerald-50 border-emerald-500 text-emerald-900 shadow-sm ring-1 ring-emerald-500' 
-                                    : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
-                                }`}
-                            >
-                                <div className="flex items-center gap-3">
-                                    <Layers className={`w-4 h-4 ${activeScenarioId === s.id ? 'text-emerald-600' : 'text-slate-400'}`} />
-                                    <span className="font-medium truncate max-w-[140px]">{s.name}</span>
-                                </div>
-                                {activeScenarioId === s.id && <div className="w-2 h-2 rounded-full bg-emerald-500 flex-shrink-0"></div>}
-                            </button>
+                            <div key={s.id} className="flex items-center gap-2">
+                                <button
+                                    onClick={() => setActiveScenarioId(s.id)}
+                                    className={`flex-1 flex items-center justify-between px-4 py-3 rounded-lg border transition-all ${
+                                        activeScenarioId === s.id 
+                                        ? 'bg-emerald-50 border-emerald-500 text-emerald-900 shadow-sm ring-1 ring-emerald-500' 
+                                        : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                                    }`}
+                                >
+                                    <div className="flex items-center gap-3">
+                                        <Layers className={`w-4 h-4 ${activeScenarioId === s.id ? 'text-emerald-600' : 'text-slate-400'}`} />
+                                        <span className="font-medium truncate max-w-[120px]">{s.name}</span>
+                                    </div>
+                                    {activeScenarioId === s.id && <div className="w-2 h-2 rounded-full bg-emerald-500 flex-shrink-0"></div>}
+                                </button>
+                                {scenarios.length > 1 && (
+                                    <button 
+                                        onClick={() => deleteScenario(s.id)}
+                                        className="p-3 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg border border-transparent hover:border-rose-100 transition-all"
+                                    >
+                                        <Trash2 className="w-4 h-4"/>
+                                    </button>
+                                )}
+                            </div>
                         ))}
                     </div>
                 </div>
@@ -314,7 +436,7 @@ export const ValuationTools: React.FC = () => {
                 {/* Scenario Comparison Chart */}
                 <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
                     <h3 className="text-sm font-bold text-slate-500 uppercase tracking-wider mb-6">Scenario Sensitivity Analysis (NPV Comparison)</h3>
-                    <div className="h-64 w-full">
+                    <div className="h-64 w-full min-w-0">
                         <ResponsiveContainer width="100%" height="100%">
                             <BarChart data={comparisonData} layout="vertical" margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
                                 <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={true} />
