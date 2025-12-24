@@ -1,5 +1,5 @@
 import React from 'react';
-import { LayoutDashboard, Calculator, Globe, MessageSquareText, FileBarChart, Database } from 'lucide-react';
+import { LayoutDashboard, Calculator, Globe, MessageSquareText, FileBarChart, Database, FileText } from 'lucide-react';
 import { AppView } from '../../types';
 
 interface SidebarProps {
@@ -11,6 +11,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView }) =
   const navItems = [
     { id: AppView.DASHBOARD, label: 'Dashboard', icon: LayoutDashboard },
     { id: AppView.VALUATION, label: 'Scenario Modeling', icon: Calculator },
+    { id: AppView.DOCUMENTS, label: 'Document Intelligence', icon: FileText },
     { id: AppView.DATA_MANAGEMENT, label: 'Data Connectors', icon: Database },
     { id: AppView.RESEARCH, label: 'Market Research', icon: Globe },
     { id: AppView.ANALYSIS, label: 'AI Analyst', icon: MessageSquareText },
@@ -45,7 +46,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView }) =
       </nav>
 
       <div className="p-4 border-t border-slate-800 text-xs text-slate-500">
-        <p>v2.0.1 • Enterprise</p>
+        <p>v2.1.0 • Enterprise</p>
         <p className="mt-1">System Status: Online</p>
       </div>
     </div>

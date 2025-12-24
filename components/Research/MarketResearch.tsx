@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { Search, Loader2, ExternalLink, Globe, AlertCircle } from 'lucide-react';
+import { Search, Loader2, ExternalLink, Globe, AlertCircle, Building2, TrendingUp, DollarSign } from 'lucide-react';
 import { GeminiService } from '../../services/geminiService';
+import { FmpService, FMPProfile } from '../../services/fmpService';
 import { ResearchResponse } from '../../types';
 import ReactMarkdown from 'react-markdown';
 
@@ -8,6 +9,7 @@ export const MarketResearch: React.FC = () => {
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<ResearchResponse | null>(null);
+  const [companyProfile, setCompanyProfile] = useState<FMPProfile | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const handleSearch = async (e: React.FormEvent) => {
@@ -17,8 +19,23 @@ export const MarketResearch: React.FC = () => {
     setLoading(true);
     setError(null);
     setData(null);
+    setCompanyProfile(null);
 
     try {
+      // 1. Check if query is a likely ticker symbol (3-5 chars, no spaces)
+      const isTicker = /^[A-Za-z]{1,5}$/.test(query);
+      if (isTicker) {
+        try {
+            const profiles = await FmpService.getCompanyProfile(query);
+            if (profiles && profiles.length > 0) {
+                setCompanyProfile(profiles[0]);
+            }
+        } catch (e) {
+            console.warn("Could not fetch FMP profile, continuing with research.");
+        }
+      }
+
+      // 2. Perform Research
       const result = await GeminiService.conductResearch(query);
       setData(result);
     } catch (err) {
@@ -33,7 +50,7 @@ export const MarketResearch: React.FC = () => {
        <div className="max-w-4xl mx-auto w-full">
          <header className="mb-8 text-center">
             <h1 className="text-3xl font-bold text-slate-900 mb-2">Market Intelligence</h1>
-            <p className="text-slate-500">Real-time market research powered by Google Search Grounding.</p>
+            <p className="text-slate-500">Real-time market research powered by Gemini & Financial Modeling Prep.</p>
          </header>
 
          <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-2 mb-8 sticky top-0 z-10">
@@ -44,7 +61,7 @@ export const MarketResearch: React.FC = () => {
                       type="text" 
                       value={query}
                       onChange={(e) => setQuery(e.target.value)}
-                      placeholder="e.g., 'Current inflation trends in US for 2024' or 'Competitor analysis for Tesla'" 
+                      placeholder="Enter a Ticker (e.g. AAPL) or Research Topic..." 
                       className="w-full pl-10 pr-4 py-3 rounded-lg border-none focus:ring-0 text-slate-900 placeholder-slate-400 outline-none"
                     />
                 </div>
@@ -65,11 +82,62 @@ export const MarketResearch: React.FC = () => {
              </div>
          )}
 
-         {loading && (
+         {loading && !companyProfile && (
              <div className="text-center py-12">
                  <Loader2 className="w-8 h-8 text-emerald-500 animate-spin mx-auto mb-4"/>
                  <p className="text-slate-500">Analyzing market data sources...</p>
              </div>
+         )}
+
+         {/* Company Snapshot Card */}
+         {companyProfile && (
+            <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden mb-6 animate-fadeIn">
+                <div className="p-6 border-b border-slate-100 flex justify-between items-start">
+                    <div className="flex items-center gap-4">
+                        {companyProfile.image && <img src={companyProfile.image} alt={companyProfile.symbol} className="w-12 h-12 rounded bg-slate-50 p-1" />}
+                        <div>
+                            <h2 className="text-xl font-bold text-slate-900">{companyProfile.companyName}</h2>
+                            <div className="flex items-center gap-2 text-sm text-slate-500">
+                                <span className="font-semibold bg-slate-100 px-2 py-0.5 rounded">{companyProfile.symbol}</span>
+                                <span>{companyProfile.exchangeShortName}</span>
+                                <span>•</span>
+                                <span>{companyProfile.currency}</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div className="text-right">
+                        <div className="text-2xl font-bold text-slate-900 flex items-center justify-end gap-1">
+                            <DollarSign className="w-5 h-5 text-slate-400"/>
+                            {companyProfile.price}
+                        </div>
+                        <div className={`text-sm font-medium flex items-center justify-end gap-1 ${companyProfile.changes >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+                            {companyProfile.changes >= 0 ? <TrendingUp className="w-3 h-3"/> : <TrendingUp className="w-3 h-3 rotate-180"/>}
+                            {companyProfile.changes.toFixed(2)} ({((companyProfile.changes / companyProfile.price) * 100).toFixed(2)}%)
+                        </div>
+                    </div>
+                </div>
+                <div className="p-6 grid grid-cols-2 md:grid-cols-4 gap-4 bg-slate-50/50">
+                    <div>
+                        <p className="text-xs text-slate-500 uppercase font-medium">Market Cap</p>
+                        <p className="font-semibold text-slate-900">${(companyProfile.mktCap / 1000000000).toFixed(2)}B</p>
+                    </div>
+                    <div>
+                        <p className="text-xs text-slate-500 uppercase font-medium">Beta</p>
+                        <p className="font-semibold text-slate-900">{companyProfile.beta.toFixed(2)}</p>
+                    </div>
+                    <div>
+                        <p className="text-xs text-slate-500 uppercase font-medium">Sector</p>
+                        <p className="font-semibold text-slate-900">{companyProfile.sector}</p>
+                    </div>
+                    <div>
+                        <p className="text-xs text-slate-500 uppercase font-medium">CEO</p>
+                        <p className="font-semibold text-slate-900 truncate">{companyProfile.ceo}</p>
+                    </div>
+                </div>
+                <div className="p-6 text-sm text-slate-600 leading-relaxed border-t border-slate-100">
+                    {companyProfile.description}
+                </div>
+            </div>
          )}
 
          {data && (
@@ -78,7 +146,7 @@ export const MarketResearch: React.FC = () => {
                  <div className="bg-white p-8 rounded-xl border border-slate-200 shadow-sm">
                      <div className="flex items-center gap-2 mb-6 border-b border-slate-100 pb-4">
                         <Globe className="w-5 h-5 text-emerald-500" />
-                        <h2 className="text-xl font-bold text-slate-800">Executive Summary</h2>
+                        <h2 className="text-xl font-bold text-slate-800">AI Executive Summary</h2>
                      </div>
                      <div className="prose prose-slate max-w-none text-slate-700 leading-relaxed">
                         <ReactMarkdown>{data.summary}</ReactMarkdown>
@@ -109,9 +177,10 @@ export const MarketResearch: React.FC = () => {
              </div>
          )}
          
-         {!data && !loading && !error && (
+         {!data && !loading && !error && !companyProfile && (
              <div className="text-center py-12 text-slate-400">
-                 <p>Enter a topic above to generate a comprehensive market report.</p>
+                 <Building2 className="w-12 h-12 mx-auto mb-4 opacity-20"/>
+                 <p>Enter a Ticker (e.g. MSFT) or Topic to generate a comprehensive market report.</p>
              </div>
          )}
        </div>

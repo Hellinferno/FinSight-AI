@@ -5,6 +5,7 @@ import { ValuationTools } from './components/Tools/ValuationTools';
 import { MarketResearch } from './components/Research/MarketResearch';
 import { AIAnalyst } from './components/Analysis/AIAnalyst';
 import { DataConnectors } from './components/Data/DataConnectors';
+import { DocumentAnalysis } from './components/Documents/DocumentAnalysis';
 import { AppView } from './types';
 
 function App() {
@@ -22,6 +23,8 @@ function App() {
         return <AIAnalyst />;
       case AppView.DATA_MANAGEMENT:
         return <DataConnectors />;
+      case AppView.DOCUMENTS:
+        return <DocumentAnalysis />;
       default:
         return <DashboardView />;
     }

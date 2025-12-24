@@ -3,7 +3,9 @@ import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 import { MetricCard } from './MetricCard';
 import { MOCK_NOTIFICATIONS, REVENUE_BY_DEPT } from '../../constants';
 import { FinancialMetric } from '../../types';
-import { Bell, Filter, Calendar as CalendarIcon, ChevronDown, Download } from 'lucide-react';
+import { Bell, Filter, Calendar as CalendarIcon, ChevronDown, Download, FileText, X, Loader2 } from 'lucide-react';
+import { GeminiService } from '../../services/geminiService';
+import ReactMarkdown from 'react-markdown';
 
 // Enhanced Mock Data for Pie Chart
 const EXPENSE_BREAKDOWN = [
@@ -16,6 +18,11 @@ const EXPENSE_BREAKDOWN = [
 export const DashboardView: React.FC = () => {
   const [departmentFilter, setDepartmentFilter] = useState<'All' | 'Sales' | 'Marketing'>('All');
   const [periodFilter, setPeriodFilter] = useState<'YTD' | 'Q1' | 'Q2'>('YTD');
+  
+  // Report Generation State
+  const [showReportModal, setShowReportModal] = useState(false);
+  const [reportLoading, setReportLoading] = useState(false);
+  const [reportContent, setReportContent] = useState('');
 
   // Dynamic Data based on filters
   const currentRevenueData = REVENUE_BY_DEPT[departmentFilter] || REVENUE_BY_DEPT['All'];
@@ -32,8 +39,37 @@ export const DashboardView: React.FC = () => {
     { label: 'Burn Rate (Mo)', value: 125000, prefix: '$', change: 2.1, trend: 'neutral' },
   ];
 
+  const handleGenerateReport = async () => {
+    setShowReportModal(true);
+    setReportLoading(true);
+    setReportContent('');
+    
+    try {
+        const context = `
+            Department: ${departmentFilter}
+            Period: ${periodFilter}
+            Total Revenue: $${totalRev}
+            Total Profit: $${totalProfit}
+            Margin: ${margin}%
+            
+            Monthly Data (Revenue vs Profit):
+            ${JSON.stringify(currentRevenueData)}
+            
+            Expense Breakdown:
+            ${JSON.stringify(EXPENSE_BREAKDOWN)}
+        `;
+        
+        const report = await GeminiService.generateReport(context);
+        setReportContent(report);
+    } catch (error) {
+        setReportContent("Failed to generate report. Please ensure your API key is configured correctly.");
+    } finally {
+        setReportLoading(false);
+    }
+  };
+
   return (
-    <div className="p-8 space-y-6 h-full overflow-y-auto bg-slate-50">
+    <div className="p-8 space-y-6 h-full overflow-y-auto bg-slate-50 relative">
       
       {/* Header & Filter Bar */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
@@ -195,7 +231,11 @@ export const DashboardView: React.FC = () => {
                         The current Profit Margin for {departmentFilter} is trending {Number(margin) < 10 ? 'below' : 'above'} target. 
                         Drill down into specific cost centers to identify variance root causes.
                     </p>
-                    <button className="bg-emerald-500 hover:bg-emerald-600 text-white px-5 py-2 rounded-lg text-sm font-bold transition-colors">
+                    <button 
+                        onClick={handleGenerateReport}
+                        className="bg-emerald-500 hover:bg-emerald-600 text-white px-5 py-2 rounded-lg text-sm font-bold transition-colors flex items-center gap-2"
+                    >
+                        <FileText className="w-4 h-4" />
                         Generate Variance Report
                     </button>
                 </div>
@@ -206,6 +246,45 @@ export const DashboardView: React.FC = () => {
                 </div>
            </div>
       </div>
+
+      {/* Report Modal */}
+      {showReportModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm">
+            <div className="bg-white rounded-xl shadow-2xl w-full max-w-3xl max-h-[85vh] flex flex-col animate-fadeIn">
+                <div className="p-6 border-b border-slate-100 flex justify-between items-center">
+                    <div className="flex items-center gap-2">
+                        <FileText className="w-5 h-5 text-emerald-600" />
+                        <h2 className="text-xl font-bold text-slate-800">Variance Analysis Report</h2>
+                    </div>
+                    <button onClick={() => setShowReportModal(false)} className="text-slate-400 hover:text-slate-600 transition-colors">
+                        <X className="w-6 h-6" />
+                    </button>
+                </div>
+                
+                <div className="flex-1 overflow-y-auto p-6">
+                    {reportLoading ? (
+                        <div className="flex flex-col items-center justify-center py-12 text-slate-500">
+                            <Loader2 className="w-10 h-10 animate-spin text-emerald-500 mb-4" />
+                            <p>Analyzing financial data and generating narrative...</p>
+                        </div>
+                    ) : (
+                        <div className="prose prose-slate prose-sm max-w-none">
+                             <ReactMarkdown>{reportContent}</ReactMarkdown>
+                        </div>
+                    )}
+                </div>
+                
+                <div className="p-6 border-t border-slate-100 bg-slate-50 rounded-b-xl flex justify-end gap-3">
+                    <button onClick={() => setShowReportModal(false)} className="px-4 py-2 border border-slate-300 rounded-lg text-sm font-medium text-slate-700 hover:bg-white transition-colors">
+                        Close
+                    </button>
+                    <button className="px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 transition-colors flex items-center gap-2">
+                        <Download className="w-4 h-4" /> Export PDF
+                    </button>
+                </div>
+            </div>
+        </div>
+      )}
     </div>
   );
 };

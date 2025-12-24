@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, User, Bot, Loader2 } from 'lucide-react';
+import { Send, User, Bot, Loader2, Sparkles, Database } from 'lucide-react';
 import { GeminiService } from '../../services/geminiService';
+import { FmpService } from '../../services/fmpService';
 import { ChatMessage } from '../../types';
 import ReactMarkdown from 'react-markdown';
 
@@ -9,12 +10,13 @@ export const AIAnalyst: React.FC = () => {
     {
         id: '1',
         role: 'model',
-        text: 'Hello, I am your Financial Analyst Assistant. I can help with ratio analysis, accounting treatment questions, or drafting report commentary. How can I assist you today?',
+        text: 'Hello, I am your Financial Analyst Assistant. I have access to real-time market data. Ask me about stock prices, company profiles, or general financial concepts.',
         timestamp: new Date()
     }
   ]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
+  const [agentAction, setAgentAction] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => {
@@ -23,7 +25,7 @@ export const AIAnalyst: React.FC = () => {
 
   useEffect(() => {
     scrollToBottom();
-  }, [messages]);
+  }, [messages, agentAction]);
 
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -39,11 +41,61 @@ export const AIAnalyst: React.FC = () => {
     setMessages(prev => [...prev, userMsg]);
     setInput('');
     setLoading(true);
+    setAgentAction(null);
 
     try {
+        // --- AGENTIC LAYER: Detect Ticker & Fetch Data ---
+        let contextInjection = "";
+        
+        // Simple regex to find potential tickers (e.g. AAPL, MSFT) - 1 to 5 uppercase letters
+        // We use a simplified heuristic here for the demo.
+        const potentialTickers = userMsg.text.match(/\b[A-Z]{2,5}\b/g);
+
+        if (potentialTickers && potentialTickers.length > 0) {
+            const ticker = potentialTickers[0]; // Take the first one found
+            setAgentAction(`Fetching real-time data for ${ticker}...`);
+            
+            try {
+                // Fetch Profile and Financials
+                const [profile, financials] = await Promise.all([
+                     FmpService.getCompanyProfile(ticker).catch(() => []),
+                     FmpService.getIncomeStatement(ticker, 1).catch(() => [])
+                ]);
+
+                if (profile.length > 0) {
+                    const p = profile[0];
+                    const f = financials.length > 0 ? financials[0] : null;
+                    
+                    contextInjection = `
+                    [SYSTEM DATA INJECTION]
+                    The user is asking about ${ticker}. Here is the real-time data from FMP API:
+                    - Price: $${p.price}
+                    - Market Cap: $${p.mktCap}
+                    - Beta: ${p.beta}
+                    - CEO: ${p.ceo}
+                    - Description: ${p.description}
+                    - Industry: ${p.industry}
+                    ${f ? `- Last Reported Revenue: ${f.revenue}` : ''}
+                    ${f ? `- Last Reported Net Income: ${f.netIncome}` : ''}
+                    
+                    Use this data to answer the user's question accurately.
+                    [/SYSTEM DATA INJECTION]
+                    `;
+                }
+            } catch (err) {
+                console.warn("Agent failed to fetch data", err);
+            }
+        }
+        // ------------------------------------------------
+
         // Convert internal message format to history format for service
+        // Append context injection to the last user message for the LLM
         const history = messages.map(m => ({ role: m.role, text: m.text }));
-        const responseText = await GeminiService.analyzeFinancialQuery(history, userMsg.text);
+        
+        // Pass the modified prompt with data injection to Gemini
+        const finalPrompt = contextInjection ? `${userMsg.text}\n\n${contextInjection}` : userMsg.text;
+
+        const responseText = await GeminiService.analyzeFinancialQuery(history, finalPrompt);
 
         const botMsg: ChatMessage = {
             id: (Date.now() + 1).toString(),
@@ -63,6 +115,7 @@ export const AIAnalyst: React.FC = () => {
         setMessages(prev => [...prev, errorMsg]);
     } finally {
         setLoading(false);
+        setAgentAction(null);
     }
   };
 
@@ -71,7 +124,9 @@ export const AIAnalyst: React.FC = () => {
       <header className="px-8 py-6 border-b border-slate-200 bg-white">
         <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
             AI Analyst
-            <span className="text-xs font-normal text-slate-500 bg-slate-100 px-2 py-1 rounded-full">Gemini 2.5 Powered</span>
+            <span className="text-xs font-normal text-emerald-700 bg-emerald-100 border border-emerald-200 px-2 py-0.5 rounded-full flex items-center gap-1">
+                <Sparkles className="w-3 h-3"/> Agentic Mode
+            </span>
         </h1>
       </header>
 
@@ -99,7 +154,19 @@ export const AIAnalyst: React.FC = () => {
                 </div>
             </div>
         ))}
-        {loading && (
+        
+        {/* Agent Action Indicator */}
+        {agentAction && (
+             <div className="flex gap-4 max-w-4xl mx-auto items-center animate-fadeIn">
+                 <div className="w-10 flex-shrink-0"></div> {/* Spacer */}
+                 <div className="flex items-center gap-2 text-xs font-medium text-emerald-600 bg-emerald-50 px-3 py-1.5 rounded-full border border-emerald-100">
+                     <Database className="w-3 h-3 animate-pulse" />
+                     {agentAction}
+                 </div>
+             </div>
+        )}
+
+        {loading && !agentAction && (
             <div className="flex gap-4 max-w-4xl mx-auto">
                  <div className="w-10 h-10 rounded-full bg-emerald-600 text-white flex-shrink-0 flex items-center justify-center">
                     <Bot className="w-5 h-5"/>
@@ -124,7 +191,7 @@ export const AIAnalyst: React.FC = () => {
                     type="text"
                     value={input}
                     onChange={(e) => setInput(e.target.value)}
-                    placeholder="Ask about financial ratios, GAAP standards, or analysis..."
+                    placeholder="Try: 'What is the current price of AAPL?' or 'Explain EBITDA'"
                     className="w-full pl-6 pr-14 py-4 rounded-xl bg-slate-50 border border-slate-200 focus:bg-white focus:ring-2 focus:ring-emerald-500 focus:border-transparent outline-none transition-all"
                 />
                 <button 
@@ -136,7 +203,7 @@ export const AIAnalyst: React.FC = () => {
                 </button>
             </form>
             <p className="text-center text-xs text-slate-400 mt-3">
-                AI may produce inaccurate information. Verify important financial data.
+                AI may produce inaccurate information. Data provided by FMP API.
             </p>
         </div>
       </div>

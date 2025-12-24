@@ -44,6 +44,7 @@ export enum AppView {
   RESEARCH = 'RESEARCH',
   ANALYSIS = 'ANALYSIS',
   DATA_MANAGEMENT = 'DATA_MANAGEMENT',
+  DOCUMENTS = 'DOCUMENTS',
 }
 
 export interface Scenario {

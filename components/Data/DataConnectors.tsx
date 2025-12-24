@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Database, RefreshCw, CheckCircle2, AlertTriangle, Calendar, Settings, Server, ArrowRight } from 'lucide-react';
+import { Database, RefreshCw, CheckCircle2, AlertTriangle, Calendar, Settings, Server, ArrowRight, Plus, X } from 'lucide-react';
 import { DataConnector } from '../../types';
 
 export const DataConnectors: React.FC = () => {
@@ -11,6 +11,9 @@ export const DataConnectors: React.FC = () => {
   ]);
 
   const [syncingId, setSyncingId] = useState<string | null>(null);
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [newConnectorName, setNewConnectorName] = useState('');
+  const [newConnectorType, setNewConnectorType] = useState<'ERP' | 'Accounting' | 'Bank'>('ERP');
 
   const handleSync = (id: string) => {
     setSyncingId(id);
@@ -26,8 +29,26 @@ export const DataConnectors: React.FC = () => {
     }, 2500);
   };
 
+  const handleAddConnector = (e: React.FormEvent) => {
+    e.preventDefault();
+    if(!newConnectorName) return;
+
+    const newConnector: DataConnector = {
+        id: Date.now().toString(),
+        name: newConnectorName,
+        type: newConnectorType,
+        status: 'disconnected',
+        lastSync: 'Never',
+        schedule: 'Manual'
+    };
+    
+    setConnectors([...connectors, newConnector]);
+    setShowAddModal(false);
+    setNewConnectorName('');
+  };
+
   return (
-    <div className="p-8 h-full overflow-y-auto bg-slate-50">
+    <div className="p-8 h-full overflow-y-auto bg-slate-50 relative">
       <header className="mb-8">
         <h1 className="text-3xl font-bold text-slate-900 flex items-center gap-2">
           <Database className="w-8 h-8 text-emerald-600" />
@@ -41,7 +62,7 @@ export const DataConnectors: React.FC = () => {
       {/* Main Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
         {connectors.map((connector) => (
-          <div key={connector.id} className="bg-white rounded-xl p-6 border border-slate-200 shadow-sm hover:shadow-md transition-all">
+          <div key={connector.id} className="bg-white rounded-xl p-6 border border-slate-200 shadow-sm hover:shadow-md transition-all animate-fadeIn">
             <div className="flex justify-between items-start mb-6">
               <div className="flex items-center gap-4">
                 <div className={`w-12 h-12 rounded-lg flex items-center justify-center ${
@@ -103,10 +124,13 @@ export const DataConnectors: React.FC = () => {
           </div>
         ))}
         
-        {/* Add New Connector */}
-        <button className="border-2 border-dashed border-slate-300 rounded-xl p-6 flex flex-col items-center justify-center text-slate-400 hover:text-emerald-600 hover:border-emerald-400 hover:bg-emerald-50/50 transition-all group min-h-[250px]">
+        {/* Add New Connector Button */}
+        <button 
+            onClick={() => setShowAddModal(true)}
+            className="border-2 border-dashed border-slate-300 rounded-xl p-6 flex flex-col items-center justify-center text-slate-400 hover:text-emerald-600 hover:border-emerald-400 hover:bg-emerald-50/50 transition-all group min-h-[250px]"
+        >
             <div className="w-16 h-16 rounded-full bg-slate-100 group-hover:bg-emerald-100 flex items-center justify-center mb-4 transition-colors">
-                <Server className="w-8 h-8 text-slate-400 group-hover:text-emerald-600" />
+                <Plus className="w-8 h-8 text-slate-400 group-hover:text-emerald-600" />
             </div>
             <h3 className="font-semibold text-lg mb-1">Add Data Source</h3>
             <p className="text-sm text-center max-w-xs">Connect to a new ERP, CRM, or Bank Feed to automate data ingestion.</p>
@@ -154,6 +178,51 @@ export const DataConnectors: React.FC = () => {
              </tbody>
          </table>
       </div>
+
+      {/* Add Connector Modal */}
+      {showAddModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm">
+            <div className="bg-white rounded-xl shadow-2xl w-full max-w-md animate-fadeIn">
+                <div className="p-6 border-b border-slate-100 flex justify-between items-center">
+                    <h3 className="text-lg font-bold text-slate-900">Connect Data Source</h3>
+                    <button onClick={() => setShowAddModal(false)} className="text-slate-400 hover:text-slate-600">
+                        <X className="w-5 h-5"/>
+                    </button>
+                </div>
+                <form onSubmit={handleAddConnector} className="p-6 space-y-4">
+                    <div>
+                        <label className="block text-sm font-medium text-slate-700 mb-1">Source Name</label>
+                        <input 
+                            type="text" 
+                            required
+                            value={newConnectorName}
+                            onChange={(e) => setNewConnectorName(e.target.value)}
+                            placeholder="e.g., Salesforce CRM"
+                            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none"
+                        />
+                    </div>
+                    <div>
+                        <label className="block text-sm font-medium text-slate-700 mb-1">Source Type</label>
+                        <select 
+                            value={newConnectorType}
+                            onChange={(e) => setNewConnectorType(e.target.value as any)}
+                            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none"
+                        >
+                            <option value="ERP">ERP System</option>
+                            <option value="Accounting">Accounting Software</option>
+                            <option value="Bank">Bank Feed</option>
+                        </select>
+                    </div>
+                    <div className="pt-2">
+                        <button type="submit" className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-medium py-2 rounded-lg transition-colors">
+                            Add Connection
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+      )}
+
       <style>{`
         @keyframes progress {
           0% { width: 0% }
