@@ -6,7 +6,7 @@ import { handleAPIError } from "../utils/errorHandler";
 // The API key is injected via vite.config.ts define: 'process.env.API_KEY'
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
-// Use the stable preview model as per guidelines to avoid stuttering/404s
+// Use the stable preview model to avoid stuttering and 404 errors
 const MODEL_FLASH = 'gemini-3-flash-preview';
 
 // Maximum message history to send to avoid token limits

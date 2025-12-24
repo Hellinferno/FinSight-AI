@@ -9,19 +9,12 @@ const getEnv = (key: string) => {
   }
 };
 
-const envUrl = getEnv('VITE_SUPABASE_URL');
-const envKey = getEnv('VITE_SUPABASE_ANON_KEY');
+const supabaseUrl = getEnv('VITE_SUPABASE_URL');
+const supabaseAnonKey = getEnv('VITE_SUPABASE_ANON_KEY');
 
-// Fallback to the provided values if env vars are missing
-const DEFAULT_URL = 'https://aklcxwvmfpadhsmldjoj.supabase.co';
-const DEFAULT_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFrbGN4d3ZtZnBhZGhzbWxkam9qIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjY1OTQzMDMsImV4cCI6MjA4MjE3MDMwM30.OKm33jOSsx07DuYPPgKghRcgx2ryObPtsGNLwIPxeJE';
-
-// Use env vars if available, otherwise use defaults
-const supabaseUrl = (envUrl && envUrl.trim().length > 0) ? envUrl : DEFAULT_URL;
-const supabaseAnonKey = (envKey && envKey.trim().length > 0) ? envKey : DEFAULT_KEY;
-
+// Log warning if credentials are missing, but DO NOT hardcode fallbacks in production code.
 if (!supabaseUrl || !supabaseAnonKey || supabaseUrl.includes('placeholder')) {
-  console.warn("Supabase credentials missing. Auth and Cloud features will be disabled.");
+  console.warn("Supabase credentials missing in .env file. Database features will be disabled.");
 }
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+export const supabase = createClient(supabaseUrl || 'https://placeholder.supabase.co', supabaseAnonKey || 'placeholder');

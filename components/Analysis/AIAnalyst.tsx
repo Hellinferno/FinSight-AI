@@ -8,6 +8,7 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, Responsive
 
 // Improved Typewriter Component
 // Uses slice approach to guarantee deterministic rendering and avoid race conditions
+// This fixes the "Ican aaayyee" stuttering bug.
 const Typewriter: React.FC<{ text: string; onComplete?: () => void }> = ({ text, onComplete }) => {
     const [displayedText, setDisplayedText] = useState('');
     const indexRef = useRef(0);
