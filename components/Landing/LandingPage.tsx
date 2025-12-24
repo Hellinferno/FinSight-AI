@@ -1,12 +1,11 @@
 import React from 'react';
-import { ArrowRight, BarChart2, Bot, Database, ShieldCheck, Globe } from 'lucide-react';
-import { AppView } from '../../types';
+import { ArrowRight, BarChart2, Bot, Database, ShieldCheck, Globe, Sparkles } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 
-interface LandingProps {
-  onEnter: () => void;
-}
+export const LandingPage: React.FC = () => {
+  const navigate = useNavigate();
+  const onEnter = () => navigate('/app/dashboard');
 
-export const LandingPage: React.FC<LandingProps> = ({ onEnter }) => {
   return (
     <div className="min-h-screen bg-slate-900 text-white overflow-hidden relative selection:bg-emerald-500/30">
       
@@ -41,7 +40,7 @@ export const LandingPage: React.FC<LandingProps> = ({ onEnter }) => {
       <main className="relative z-10 max-w-7xl mx-auto px-8 pt-20 pb-32 text-center lg:text-left lg:flex items-center justify-between gap-12">
         <div className="lg:w-1/2 space-y-8">
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-semibold uppercase tracking-wider">
-                <SparklesIcon className="w-3 h-3" />
+                <Sparkles className="w-3 h-3" />
                 Now with Gemini 2.0 Flash
             </div>
             <h1 className="text-5xl lg:text-7xl font-extrabold tracking-tight leading-tight">
@@ -127,9 +126,3 @@ const FeatureCard = ({ icon, title, desc }: any) => (
         <p className="text-slate-400 leading-relaxed">{desc}</p>
     </div>
 );
-
-const SparklesIcon = ({className}: {className?: string}) => (
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className={className}>
-        <path d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 00-2.456 2.456zM16.894 20.567L16.5 21.75l-.394-1.183a2.25 2.25 0 00-1.423-1.423L13.5 18.75l1.183-.394a2.25 2.25 0 001.423-1.423l.394-1.183.394 1.183a2.25 2.25 0 001.423 1.423l1.183.394-1.183.394a2.25 2.25 0 00-1.423-1.423z" />
-    </svg>
-)

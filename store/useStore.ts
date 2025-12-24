@@ -7,6 +7,10 @@ interface AppState {
   user: any | null;
   setUser: (user: any) => void;
 
+  // Subscription State
+  isPro: boolean;
+  setProStatus: (status: boolean) => void;
+
   // View State
   currentView: AppView;
   setView: (view: AppView) => void;
@@ -27,6 +31,9 @@ interface AppState {
 export const useStore = create<AppState>((set) => ({
   user: null,
   setUser: (user) => set({ user }),
+
+  isPro: false,
+  setProStatus: (status) => set({ isPro: status }),
 
   currentView: AppView.DASHBOARD,
   setView: (view) => set({ currentView: view }),

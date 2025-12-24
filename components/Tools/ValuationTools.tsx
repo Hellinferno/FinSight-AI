@@ -1,11 +1,13 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Plus, Trash2, Calculator, RefreshCw, Save, Copy, TrendingUp, TrendingDown, Layers, Download, Search, Loader2, Cloud, CloudOff, FileText, Table } from 'lucide-react';
+import { Plus, Trash2, Calculator, RefreshCw, Save, Copy, TrendingUp, TrendingDown, Layers, Download, Search, Loader2, Cloud, CloudOff, FileText, Table, DownloadCloud } from 'lucide-react';
 import { CashFlowData, ValuationResult, Scenario } from '../../types';
 import { DEFAULT_SCENARIO, OPTIMISTIC_SCENARIO, PESSIMISTIC_SCENARIO } from '../../constants';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { FmpService, FMPIncomeStatement } from '../../services/fmpService';
 import { supabase } from '../../lib/supabaseClient';
 import { validateTicker } from '../../utils/errorHandler';
+import { useStore } from '../../store/useStore';
+import { PricingModal } from '../Subscription/PricingModal';
 
 // Helper for formatting large numbers
 const formatLargeNumber = (num: number) => {
@@ -18,6 +20,9 @@ const formatLargeNumber = (num: number) => {
 const STORAGE_KEY = 'finsight_scenarios_v1';
 
 export const ValuationTools: React.FC = () => {
+  const { isPro } = useStore();
+  const [showUpgrade, setShowUpgrade] = useState(false);
+  
   // Initialize state with default, then attempt to load from storage
   const [scenarios, setScenarios] = useState<Scenario[]>([DEFAULT_SCENARIO, OPTIMISTIC_SCENARIO, PESSIMISTIC_SCENARIO]);
   const [activeScenarioId, setActiveScenarioId] = useState<string>(DEFAULT_SCENARIO.id);
@@ -90,6 +95,11 @@ export const ValuationTools: React.FC = () => {
   const saveScenarioToCloud = async () => {
       if (!user) {
           alert("Please sign in from the sidebar to save scenarios to the cloud.");
+          return;
+      }
+      // PAYWALL CHECK
+      if (!isPro) {
+          setShowUpgrade(true);
           return;
       }
       setIsSaving(true);
@@ -282,6 +292,31 @@ export const ValuationTools: React.FC = () => {
       setActiveScenarioId(newScenarios[0].id);
   }
 
+  const exportToCSV = () => {
+    // PAYWALL CHECK
+    if (!isPro) {
+        setShowUpgrade(true);
+        return;
+    }
+
+    const headers = ['Year', 'Revenue', 'COGS', 'Gross Profit', 'OpEx', 'EBITDA', 'Net Income', 'Free Cash Flow'];
+    const rows = currentFlows.map(f => [
+        f.year, f.revenue, f.cogs, f.grossProfit, f.opex, f.ebitda, f.netIncome, f.cashFlow
+    ].join(','));
+    
+    const csvContent = "data:text/csv;charset=utf-8," 
+        + headers.join(',') + "\n" 
+        + rows.join("\n");
+        
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", `${activeScenario.name}_model.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   const handleImportTicker = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!tickerInput.trim()) return;
@@ -346,6 +381,7 @@ export const ValuationTools: React.FC = () => {
 
   return (
     <div className="p-8 h-full overflow-y-auto bg-slate-50">
+      <PricingModal isOpen={showUpgrade} onClose={() => setShowUpgrade(false)} />
       <div className="max-w-6xl mx-auto">
         <header className="mb-8 flex flex-col md:flex-row justify-between items-start md:items-end gap-4">
             <div>
@@ -382,6 +418,12 @@ export const ValuationTools: React.FC = () => {
                  </form>
                  <button onClick={createScenario} className="flex items-center gap-2 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 px-4 py-2 rounded-lg text-sm font-medium transition-colors">
                     <Copy className="w-4 h-4" /> Duplicate
+                </button>
+                <button 
+                    onClick={exportToCSV}
+                    className="flex items-center gap-2 bg-slate-100 border border-slate-300 hover:bg-slate-200 text-slate-700 px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+                >
+                    <DownloadCloud className="w-4 h-4" /> Export CSV
                 </button>
                 <button 
                     onClick={saveScenarioToCloud}

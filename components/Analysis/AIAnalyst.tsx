@@ -5,8 +5,12 @@ import { FmpService } from '../../services/fmpService';
 import { ChatMessage } from '../../types';
 import ReactMarkdown from 'react-markdown';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import { useStore } from '../../store/useStore';
+import { PricingModal } from '../Subscription/PricingModal';
 
 export const AIAnalyst: React.FC = () => {
+  const { isPro } = useStore();
+  const [showUpgrade, setShowUpgrade] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
         id: '1',
@@ -25,6 +29,12 @@ export const AIAnalyst: React.FC = () => {
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!input.trim() || loading) return;
+
+    // PAYWALL CHECK: 5 messages limit for free
+    if (!isPro && messages.filter(m => m.role === 'user').length >= 5) {
+        setShowUpgrade(true);
+        return;
+    }
 
     const userMsg: ChatMessage = { id: Date.now().toString(), role: 'user', text: input, timestamp: new Date() };
     setMessages(prev => [...prev, userMsg]);
@@ -46,7 +56,6 @@ export const AIAnalyst: React.FC = () => {
 
         for await (const chunk of streamIterator) {
             // Check for Function Calls first
-            // Note: @google/genai SDK chunks structure check
             const fc = chunk.functionCalls?.[0];
             if (fc) {
                 functionCallFound = true;
@@ -132,6 +141,8 @@ export const AIAnalyst: React.FC = () => {
 
   return (
     <div className="flex flex-col h-full bg-slate-50 dark:bg-slate-900 relative transition-colors duration-300">
+      <PricingModal isOpen={showUpgrade} onClose={() => setShowUpgrade(false)} />
+      
       <header className="px-8 py-6 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950">
         <h1 className="text-2xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
             AI Analyst <span className="text-xs font-normal text-emerald-700 bg-emerald-100 dark:bg-emerald-900 dark:text-emerald-300 px-2 py-0.5 rounded-full">Agent Active</span>
@@ -208,7 +219,7 @@ export const AIAnalyst: React.FC = () => {
                     type="text"
                     value={input}
                     onChange={(e) => setInput(e.target.value)}
-                    placeholder="Try: 'Compare Apple and Microsoft' or 'Analyze NVDA'"
+                    placeholder={isPro ? "Try: 'Compare Apple and Microsoft' or 'Analyze NVDA'" : "Try: 'Compare Apple and Microsoft' (5 free messages left)"}
                     className="w-full pl-6 pr-14 py-4 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white focus:bg-white dark:focus:bg-slate-800 focus:ring-2 focus:ring-emerald-500 outline-none transition-all"
                 />
                 <button type="submit" disabled={!input.trim() || loading} className="absolute right-3 top-3 p-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50 transition-colors">

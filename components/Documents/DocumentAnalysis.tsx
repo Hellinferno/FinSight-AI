@@ -1,16 +1,21 @@
 import React, { useState, useCallback } from 'react';
 import { useDropzone } from 'react-dropzone';
-import { FileText, Bot, Sparkles, AlertCircle, TrendingUp, Eraser, UploadCloud, Loader2 } from 'lucide-react';
+import { FileText, Send, Bot, Loader2, UploadCloud, Eraser, User } from 'lucide-react';
 import { GeminiService } from '../../services/geminiService';
 import { extractTextFromPDF } from '../../utils/pdfUtils';
 import ReactMarkdown from 'react-markdown';
+import { useStore } from '../../store/useStore';
+import { PricingModal } from '../Subscription/PricingModal';
 
 export const DocumentAnalysis: React.FC = () => {
-  const [text, setText] = useState('');
-  const [result, setResult] = useState('');
+  const { isPro } = useStore();
+  const [showUpgrade, setShowUpgrade] = useState(false);
+  
+  const [fileContent, setFileContent] = useState('');
+  const [messages, setMessages] = useState<{role: string, text: string}[]>([]);
+  const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [processingFile, setProcessingFile] = useState(false);
-  const [activeTab, setActiveTab] = useState<'summary' | 'sentiment' | 'risks' | 'guidance'>('summary');
 
   // Dropzone Handler
   const onDrop = useCallback(async (acceptedFiles: File[]) => {
@@ -21,12 +26,17 @@ export const DocumentAnalysis: React.FC = () => {
     try {
         if (file.type === 'application/pdf') {
             const extractedText = await extractTextFromPDF(file);
-            setText(extractedText);
+            setFileContent(extractedText);
         } else {
             // Fallback for text files
             const text = await file.text();
-            setText(text);
+            setFileContent(text);
         }
+        // Reset chat on new file
+        setMessages([{
+            role: 'model',
+            text: `I've analyzed **${file.name}**. I'm ready to answer questions about revenue, risk factors, or financial guidance found in the document.`
+        }]);
     } catch (err) {
         alert("Failed to parse file. Please upload a valid PDF or Text file.");
     } finally {
@@ -43,134 +53,161 @@ export const DocumentAnalysis: React.FC = () => {
     multiple: false
   });
 
-  const handleAnalyze = async (type: 'summary' | 'sentiment' | 'risks' | 'guidance') => {
-    if (!text.trim()) return;
-    setActiveTab(type);
-    setLoading(true);
-    setResult('');
+  const handleChat = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!input.trim() || loading) return;
     
+    // PAYWALL CHECK: Free users get 2 messages per document
+    if (!isPro && messages.filter(m => m.role === 'user').length >= 2) {
+        setShowUpgrade(true);
+        return;
+    }
+
+    const userMsg = { role: 'user', text: input };
+    setMessages(prev => [...prev, userMsg]);
+    setInput('');
+    setLoading(true);
+
     try {
-        const analysis = await GeminiService.analyzeDocument(text, type);
-        setResult(analysis);
-    } catch (e) {
-        setResult("Error analyzing document. Please try again.");
+        // We pass the ENTIRE document context + history + new question
+        // This is "Long Context Chat"
+        const contextPrompt = `
+          DOCUMENT CONTEXT:
+          ${fileContent.substring(0, 500000)} 
+          
+          CHAT HISTORY:
+          ${JSON.stringify(messages.slice(-5))}
+          
+          USER QUESTION:
+          ${userMsg.text}
+          
+          Answer as a financial analyst referencing the document above. Be specific and cite numbers where possible.
+        `;
+        
+        const response = await GeminiService.generateReport(contextPrompt); // Re-using generate method for simplicity
+        setMessages(prev => [...prev, { role: 'model', text: response }]);
+    } catch (err) {
+        setMessages(prev => [...prev, { role: 'model', text: "Error analyzing document context." }]);
     } finally {
         setLoading(false);
     }
   };
 
   return (
-    <div className="flex h-full bg-slate-50 overflow-hidden">
-        {/* Left Panel: Input */}
-        <div className="w-1/2 flex flex-col border-r border-slate-200 bg-white p-6">
-            <header className="mb-6">
+    <div className="flex h-full bg-slate-50 dark:bg-slate-950 overflow-hidden">
+       <PricingModal isOpen={showUpgrade} onClose={() => setShowUpgrade(false)} />
+       
+       {/* Left: Document Viewer (Simplified/Preview) */}
+       <div className="hidden md:flex w-1/3 border-r border-slate-200 bg-white p-6 flex-col">
+          <header className="mb-6">
                 <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
                     <FileText className="w-6 h-6 text-emerald-600" />
-                    Document Intelligence
+                    Doc Intelligence
                 </h1>
                 <p className="text-slate-500 text-sm mt-1">
-                    Upload Earnings Calls (PDF), 10-K reports, or transcripts.
+                    Chat with Earnings Calls (PDF), 10-K reports, or transcripts using Gemini 1.5 Pro Long Context.
                 </p>
             </header>
-            
-            {/* The Drop Zone Area */}
-            <div className="flex-1 flex flex-col gap-4 min-h-0">
-                {!text ? (
-                    <div 
-                        {...getRootProps()} 
-                        className={`flex-1 border-2 border-dashed rounded-xl flex flex-col items-center justify-center cursor-pointer transition-all ${
-                            isDragActive ? 'border-emerald-500 bg-emerald-50' : 'border-slate-300 hover:border-emerald-400 hover:bg-slate-50'
-                        }`}
-                    >
-                        <input {...getInputProps()} />
-                        {processingFile ? (
-                            <div className="text-center">
-                                <Loader2 className="w-10 h-10 text-emerald-600 animate-spin mx-auto mb-4" />
-                                <p className="text-slate-600 font-medium">Extracting text from PDF...</p>
+
+          <div className="flex-1 bg-slate-50 rounded-xl border border-slate-200 p-4 overflow-y-auto">
+             <h3 className="font-bold text-xs uppercase text-slate-400 mb-2 sticky top-0 bg-slate-50 pb-2">Extracted Context Preview</h3>
+             <div className="text-xs text-slate-500 font-mono whitespace-pre-wrap leading-relaxed">
+                {fileContent ? fileContent.substring(0, 3000) + "..." : "No document loaded. Upload a file to see preview."}
+             </div>
+          </div>
+          
+          {fileContent && (
+             <button 
+                onClick={() => { setFileContent(''); setMessages([]); }}
+                className="mt-4 flex items-center justify-center gap-2 text-sm text-rose-600 hover:bg-rose-50 p-2 rounded-lg transition-colors"
+             >
+                <Eraser className="w-4 h-4"/> Clear Document
+             </button>
+          )}
+       </div>
+
+       {/* Right: Chat Interface */}
+       <div className="flex-1 flex flex-col relative bg-slate-50/50">
+          {!fileContent ? (
+             <div className="flex-1 flex flex-col items-center justify-center p-8">
+                <div 
+                    {...getRootProps()} 
+                    className={`max-w-xl w-full border-2 border-dashed rounded-2xl flex flex-col items-center justify-center cursor-pointer transition-all p-12 ${
+                        isDragActive ? 'border-emerald-500 bg-emerald-50 scale-105' : 'border-slate-300 hover:border-emerald-400 hover:bg-white'
+                    }`}
+                >
+                    <input {...getInputProps()} />
+                    {processingFile ? (
+                        <div className="text-center">
+                            <Loader2 className="w-12 h-12 text-emerald-600 animate-spin mx-auto mb-4" />
+                            <p className="text-slate-800 font-bold text-lg">Extracting Data...</p>
+                            <p className="text-slate-500 text-sm">Processing PDF layout and text</p>
+                        </div>
+                    ) : (
+                        <div className="text-center">
+                            <div className="w-20 h-20 bg-emerald-50 rounded-full flex items-center justify-center mx-auto mb-6">
+                                <UploadCloud className="w-10 h-10 text-emerald-600" />
                             </div>
-                        ) : (
-                            <div className="text-center p-8">
-                                <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                                    <UploadCloud className="w-8 h-8 text-slate-400" />
-                                </div>
-                                <p className="text-lg font-semibold text-slate-700">Click to upload or drag & drop</p>
-                                <p className="text-sm text-slate-500 mt-2">PDF or TXT files supported</p>
-                            </div>
-                        )}
-                    </div>
-                ) : (
-                    <div className="flex-1 relative">
-                         <div className="absolute top-2 right-2 z-10">
-                            <button 
-                                onClick={() => setText('')} 
-                                className="bg-slate-800 text-white text-xs px-3 py-1.5 rounded-full hover:bg-rose-600 transition-colors shadow-sm flex items-center gap-1"
-                            >
-                                <Eraser className="w-3 h-3" /> Clear & Upload New
+                            <h3 className="text-2xl font-bold text-slate-800 mb-2">Upload Financial Document</h3>
+                            <p className="text-slate-500 mb-6">Drag & drop PDF, TXT, or CSV files here</p>
+                            <button className="bg-slate-900 text-white px-6 py-2 rounded-lg font-medium hover:bg-slate-800 transition-colors">
+                                Browse Files
                             </button>
+                        </div>
+                    )}
+                </div>
+             </div>
+          ) : (
+             <>
+               <div className="flex-1 overflow-y-auto p-6 space-y-6">
+                  {messages.map((m, i) => (
+                      <div key={i} className={`flex gap-4 ${m.role === 'user' ? 'flex-row-reverse' : ''} max-w-3xl mx-auto w-full`}>
+                         <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${m.role === 'user' ? 'bg-slate-200' : 'bg-emerald-600 text-white'}`}>
+                             {m.role === 'user' ? <User className="w-4 h-4 text-slate-600"/> : <Bot className="w-4 h-4"/>}
                          </div>
-                        <textarea
-                            value={text}
-                            onChange={(e) => setText(e.target.value)}
-                            className="w-full h-full p-4 rounded-xl border border-slate-200 bg-slate-50 resize-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent outline-none font-mono text-xs leading-relaxed"
+                         <div className={`p-5 rounded-2xl shadow-sm leading-relaxed text-sm ${
+                             m.role === 'user' 
+                             ? 'bg-slate-800 text-white rounded-tr-none' 
+                             : 'bg-white border border-slate-200 text-slate-800 rounded-tl-none'
+                         }`}>
+                             <ReactMarkdown>{m.text}</ReactMarkdown>
+                         </div>
+                      </div>
+                  ))}
+                  {loading && (
+                      <div className="flex gap-4 max-w-3xl mx-auto w-full">
+                          <div className="w-8 h-8 rounded-full bg-emerald-600 text-white flex items-center justify-center flex-shrink-0"><Bot className="w-4 h-4"/></div>
+                          <div className="bg-white border border-slate-200 px-4 py-3 rounded-2xl rounded-tl-none flex items-center gap-2 shadow-sm">
+                             <span className="text-sm text-slate-500">Analyzing document context...</span>
+                             <Loader2 className="w-4 h-4 animate-spin text-emerald-500"/>
+                          </div>
+                      </div>
+                  )}
+               </div>
+
+               <div className="p-4 bg-white border-t border-slate-200">
+                  <div className="max-w-3xl mx-auto relative">
+                      <form onSubmit={handleChat}>
+                        <input 
+                            value={input} 
+                            onChange={e => setInput(e.target.value)}
+                            placeholder={isPro ? "Ask about revenue, risks, or guidance..." : "Ask a question (2 free messages remaining)..."}
+                            disabled={loading}
+                            className="w-full pl-6 pr-14 py-4 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-transparent outline-none shadow-sm text-slate-800 placeholder-slate-400 bg-slate-50 focus:bg-white transition-all"
                         />
-                    </div>
-                )}
-            </div>
-        </div>
-
-        {/* Right Panel: Analysis */}
-        <div className="w-1/2 flex flex-col bg-slate-50/50 p-6">
-             <div className="flex gap-2 mb-6 overflow-x-auto pb-2 no-scrollbar">
-                 <TabButton active={activeTab === 'summary'} onClick={() => handleAnalyze('summary')} label="Executive Summary" icon={FileText} />
-                 <TabButton active={activeTab === 'guidance'} onClick={() => handleAnalyze('guidance')} label="Extract Guidance" icon={TrendingUp} />
-                 <TabButton active={activeTab === 'risks'} onClick={() => handleAnalyze('risks')} label="Risk Factors" icon={AlertCircle} />
-                 <TabButton active={activeTab === 'sentiment'} onClick={() => handleAnalyze('sentiment')} label="Sentiment" icon={Sparkles} />
-             </div>
-
-             <div className="flex-1 bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden flex flex-col">
-                 <div className="p-4 border-b border-slate-100 bg-slate-50/50 flex justify-between items-center">
-                     <h3 className="font-bold text-slate-700 uppercase text-xs tracking-wider flex items-center gap-2">
-                        <Bot className="w-4 h-4 text-emerald-600" />
-                        AI Analysis Results
-                     </h3>
-                     {loading && <span className="text-xs text-emerald-600 font-medium animate-pulse">Processing 50+ pages...</span>}
-                 </div>
-                 
-                 <div className="flex-1 p-6 overflow-y-auto">
-                     {loading ? (
-                         <div className="space-y-4 animate-pulse">
-                             <div className="h-4 bg-slate-100 rounded w-3/4"></div>
-                             <div className="h-4 bg-slate-100 rounded w-full"></div>
-                             <div className="h-4 bg-slate-100 rounded w-5/6"></div>
-                             <div className="h-20 bg-slate-100 rounded w-full mt-6"></div>
-                         </div>
-                     ) : result ? (
-                         <div className="prose prose-slate prose-sm max-w-none">
-                             <ReactMarkdown>{result}</ReactMarkdown>
-                         </div>
-                     ) : (
-                         <div className="h-full flex flex-col items-center justify-center text-slate-400">
-                             <Sparkles className="w-12 h-12 mb-4 opacity-20" />
-                             <p>Upload a document and select an analysis type.</p>
-                         </div>
-                     )}
-                 </div>
-             </div>
-        </div>
+                        <button 
+                            type="submit" 
+                            disabled={!input.trim() || loading}
+                            className="absolute right-2 top-2 p-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50 transition-colors"
+                        >
+                            <Send className="w-5 h-5" />
+                        </button>
+                      </form>
+                  </div>
+               </div>
+             </>
+          )}
+       </div>
     </div>
   );
 };
-
-const TabButton = ({ active, onClick, label, icon: Icon }: any) => (
-    <button
-        onClick={onClick}
-        className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap ${
-            active 
-            ? 'bg-emerald-600 text-white shadow-md shadow-emerald-200' 
-            : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'
-        }`}
-    >
-        <Icon className="w-4 h-4" />
-        {label}
-    </button>
-);

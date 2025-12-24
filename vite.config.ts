@@ -1,10 +1,5 @@
-import path from 'path';
 import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
-import { fileURLToPath } from 'url';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 export default defineConfig(({ mode }) => {
   // Load env file based on `mode` in the current working directory.
@@ -21,14 +16,8 @@ export default defineConfig(({ mode }) => {
     define: {
       // Polyfill process.env.API_KEY for the Gemini SDK
       // This maps the VITE_GEMINI_API_KEY from your .env file to process.env.API_KEY
-      // Fallback to empty string to prevent runtime crashes if key is missing
-      'process.env.API_KEY': JSON.stringify(env.API_KEY || env.VITE_GEMINI_API_KEY || ''),
-    },
-    
-    resolve: {
-      alias: {
-        '@': path.resolve(__dirname, '.'),
-      }
+      // Fallback to 'placeholder_key' to prevent runtime crashes if key is missing
+      'process.env.API_KEY': JSON.stringify(env.API_KEY || env.VITE_GEMINI_API_KEY || 'placeholder_key'),
     },
     
     build: {
