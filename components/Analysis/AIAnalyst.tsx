@@ -37,19 +37,42 @@ export const AIAnalyst: React.FC = () => {
         const response: any = await GeminiService.startFinancialChat(history, userMsg.text);
 
         if (response.type === 'TOOL_CALL' && response.functionName === 'get_realtime_stock_data') {
-            const ticker = (response.args as any).ticker;
-            setAgentAction(`Fetching live data for ${ticker}...`);
+            let ticker = (response.args as any).ticker;
+            setAgentAction(`Fetching data for "${ticker}"...`);
 
-            // 2. Execute Tool (Fetch Data)
             try {
-                const [profile, financials] = await Promise.all([
-                    FmpService.getCompanyProfile(ticker).catch(() => []),
-                    FmpService.getIncomeStatement(ticker, 1).catch(() => [])
-                ]);
+                // STRATEGY: Try Direct Ticker -> If Fail -> Fuzzy Search
+                let profile = await FmpService.getCompanyProfile(ticker).catch(() => []);
+                let wasTypo = false;
+
+                // If direct lookup failed (empty array), assume it's a name or typo
+                if (!profile || profile.length === 0) {
+                     setAgentAction(`"${ticker}" not found. Auto-correcting...`);
+                     const searchResults = await FmpService.searchTicker(ticker).catch(() => []);
+                     
+                     if (searchResults && searchResults.length > 0) {
+                         // We found a match! (e.g. "Goggle" -> "GOOGL")
+                         ticker = searchResults[0].symbol; 
+                         wasTypo = true;
+                         setAgentAction(`Resolved to ${ticker}. Fetching data...`);
+                         // Now fetch the REAL data using the correct symbol
+                         profile = await FmpService.getCompanyProfile(ticker);
+                     }
+                }
+
+                // If we STILL have no profile, give up
+                if (!profile || profile.length === 0) {
+                    throw new Error("Stock not found. Please check the ticker or company name.");
+                }
+
+                // Fetch Financials
+                const financials = await FmpService.getIncomeStatement(ticker, 1).catch(() => []);
 
                 const toolData = {
-                    profile: profile[0] || "Not found",
-                    financials: financials[0] || "Not found"
+                    status: "success",
+                    note: wasTypo ? `User searched for name/typo. Auto-resolved to ${ticker}.` : "Direct ticker match.",
+                    profile: profile[0],
+                    financials: financials[0] || "Not available"
                 };
 
                 // 3. Send Data back to Gemini for final answer
@@ -62,11 +85,12 @@ export const AIAnalyst: React.FC = () => {
                     timestamp: new Date()
                 }]);
 
-            } catch (err) {
+            } catch (err: any) {
+                const errorMsg = err.message || "Failed to fetch stock data.";
                 setMessages(prev => [...prev, {
                     id: Date.now().toString(),
                     role: 'model',
-                    text: "Failed to fetch stock data. Please check the ticker.",
+                    text: `I couldn't find data for that company. ${errorMsg}`,
                     timestamp: new Date(),
                     isError: true
                 }]);

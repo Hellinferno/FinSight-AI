@@ -5,6 +5,7 @@ import { DEFAULT_SCENARIO, OPTIMISTIC_SCENARIO, PESSIMISTIC_SCENARIO } from '../
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { FmpService, FMPIncomeStatement } from '../../services/fmpService';
 import { supabase } from '../../lib/supabaseClient';
+import { validateTicker } from '../../utils/errorHandler';
 
 // Helper for formatting large numbers
 const formatLargeNumber = (num: number) => {
@@ -217,6 +218,9 @@ export const ValuationTools: React.FC = () => {
     setImportError(null);
 
     try {
+        // Validate Ticker before fetch
+        validateTicker(tickerInput.toUpperCase());
+
         const financials = await FmpService.getIncomeStatement(tickerInput);
         if (!financials || financials.length < 2) {
             throw new Error("Insufficient financial data found for this ticker.");

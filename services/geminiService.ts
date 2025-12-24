@@ -1,11 +1,10 @@
 import { GoogleGenAI, Type, FunctionDeclaration, Tool } from "@google/genai";
 import { SearchResult, ResearchResponse } from "../types";
+import { handleAPIError } from "../utils/errorHandler";
 
-// Safely access environment variables to prevent crash if import.meta.env is undefined
-const apiKey = import.meta.env?.VITE_GEMINI_API_KEY || '';
-const ai = new GoogleGenAI({ apiKey });
+const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
-const MODEL_FLASH = 'gemini-2.0-flash-exp'; // Using Flash 2.0 for better tool performance
+const MODEL_FLASH = 'gemini-3-flash-preview'; 
 
 // --- DEFINE TOOLS ---
 const financialTools: Tool[] = [
@@ -13,13 +12,13 @@ const financialTools: Tool[] = [
     functionDeclarations: [
       {
         name: "get_realtime_stock_data",
-        description: "Get real-time stock price, market cap, and company profile for a given ticker symbol.",
+        description: "Get real-time stock price, market cap, and company profile. Accepts Ticker Symbols (AAPL) OR Company Names (Apple, Microsoft).",
         parameters: {
           type: Type.OBJECT,
           properties: {
             ticker: {
               type: Type.STRING,
-              description: "The stock ticker symbol (e.g., AAPL, MSFT, TSLA)."
+              description: "The ticker symbol OR company name provided by the user (e.g. 'Apple', 'NVDA', 'Goggle')."
             }
           },
           required: ["ticker"]
@@ -34,8 +33,6 @@ export const GeminiService = {
    * Performs market research using Google Search Grounding.
    */
   async conductResearch(query: string): Promise<ResearchResponse> {
-    if (!apiKey) throw new Error("API Key not found in .env.local (VITE_GEMINI_API_KEY)");
-
     try {
       const response = await ai.models.generateContent({
         model: MODEL_FLASH,
@@ -60,8 +57,7 @@ export const GeminiService = {
       return { summary, sources: uniqueSources };
 
     } catch (error) {
-      console.error("Gemini Search Error:", error);
-      throw error;
+      handleAPIError(error, 'Gemini');
     }
   },
 
@@ -69,8 +65,6 @@ export const GeminiService = {
    * Generates a narrative report for a dataset.
    */
   async generateReport(dataContext: string): Promise<string> {
-     if (!apiKey) throw new Error("API Key not found");
-
      try {
         const response = await ai.models.generateContent({
             model: MODEL_FLASH,
@@ -78,8 +72,7 @@ export const GeminiService = {
         });
         return response.text || "No report generated.";
      } catch (error) {
-         console.error("Gemini Report Error:", error);
-         throw error;
+         handleAPIError(error, 'Gemini');
      }
   },
 
@@ -87,8 +80,6 @@ export const GeminiService = {
    * Analyzes unstructured documents (Transcripts, 10-K snippets).
    */
   async analyzeDocument(text: string, analysisType: 'summary' | 'sentiment' | 'risks' | 'guidance'): Promise<string> {
-      if (!apiKey) throw new Error("API Key not found");
-
       let prompt = "";
       switch (analysisType) {
           case 'summary':
@@ -112,8 +103,7 @@ export const GeminiService = {
           });
           return response.text || "Analysis failed.";
       } catch (error) {
-          console.error("Gemini Document Analysis Error:", error);
-          throw error;
+          handleAPIError(error, 'Gemini');
       }
   },
 
@@ -122,39 +112,41 @@ export const GeminiService = {
    * This sends the user message AND the tool definitions to Gemini.
    */
   async startFinancialChat(history: { role: string; text: string }[], message: string) {
-    if (!apiKey) throw new Error("API Key not found");
+    try {
+        const chat = ai.chats.create({
+        model: MODEL_FLASH,
+        config: {
+            systemInstruction: "You are an expert Financial Analyst. You have access to real-time tools. If a user asks for stock data, prices, or company info, ALWAYS use the 'get_realtime_stock_data' tool. Do not hallucinate prices.",
+            tools: financialTools,
+        },
+        history: history.map(h => ({
+            role: h.role,
+            parts: [{ text: h.text }]
+        }))
+        });
 
-    const chat = ai.chats.create({
-      model: MODEL_FLASH,
-      config: {
-        systemInstruction: "You are an expert Financial Analyst. You have access to real-time tools. If a user asks for stock data, prices, or company info, ALWAYS use the 'get_realtime_stock_data' tool. Do not hallucinate prices.",
-        tools: financialTools, // <--- We give the AI the tools here
-      },
-      history: history.map(h => ({
-        role: h.role,
-        parts: [{ text: h.text }]
-      }))
-    });
+        // Send the message. Gemini will reply with either TEXT or a FUNCTION CALL.
+        const response = await chat.sendMessage({ message });
+        
+        // Check if Gemini wants to call a function
+        const call = response.functionCalls?.[0];
 
-    // Send the message. Gemini will reply with either TEXT or a FUNCTION CALL.
-    const response = await chat.sendMessage({ message });
-    
-    // Check if Gemini wants to call a function
-    const call = response.functionCalls?.[0];
+        if (call) {
+            return {
+                type: 'TOOL_CALL',
+                functionName: call.name,
+                args: call.args
+            };
+        }
 
-    if (call) {
+        // Otherwise, it's a normal text response
         return {
-            type: 'TOOL_CALL',
-            functionName: call.name,
-            args: call.args
+            type: 'TEXT',
+            text: response.text
         };
+    } catch (error) {
+        handleAPIError(error, 'Gemini');
     }
-
-    // Otherwise, it's a normal text response
-    return {
-        type: 'TEXT',
-        text: response.text
-    };
   },
 
   /**
@@ -162,21 +154,25 @@ export const GeminiService = {
    * After we (the code) execute the tool, we feed the result back so Gemini can write the final answer.
    */
   async sendToolResultToChat(history: any[], toolName: string, toolOutput: any) {
-      // Re-construct chat state (stateless for this phase, creating new context)
-      const prompt = `
-      [SYSTEM: TOOL OUTPUT]
-      Tool Name: ${toolName}
-      Result: ${JSON.stringify(toolOutput)}
-      [/SYSTEM]
-      
-      Based on the tool output above, please answer the user's original request.
-      `;
-      
-      const response = await ai.models.generateContent({
-          model: MODEL_FLASH,
-          contents: [...history.map((h: any) => ({ role: h.role, parts: [{ text: h.text }] })), { role: 'user', parts: [{ text: prompt }] }]
-      });
-      
-      return response.text;
+      try {
+        // Re-construct chat state (stateless for this phase, creating new context)
+        const prompt = `
+        [SYSTEM: TOOL OUTPUT]
+        Tool Name: ${toolName}
+        Result: ${JSON.stringify(toolOutput)}
+        [/SYSTEM]
+        
+        Based on the tool output above, please answer the user's original request.
+        `;
+        
+        const response = await ai.models.generateContent({
+            model: MODEL_FLASH,
+            contents: [...history.map((h: any) => ({ role: h.role, parts: [{ text: h.text }] })), { role: 'user', parts: [{ text: prompt }] }]
+        });
+        
+        return response.text;
+      } catch (error) {
+          handleAPIError(error, 'Gemini');
+      }
   }
 };
