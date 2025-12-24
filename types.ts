@@ -11,14 +11,27 @@ export interface FinancialMetric {
 
 export interface CashFlowData {
   year: number;
+  // Income Statement
   revenue: number;
   cogs: number;
   grossProfit: number;
-  opex: number;
+  opex: number; // SG&A / Cash OpEx
+  ebitda: number;
+  depreciation: number;
   ebit: number;
   tax: number;
   netIncome: number;
-  cashFlow: number;
+  // Cash Flow
+  changeInNWC: number;
+  capex: number;
+  cashFlow: number; // Unlevered Free Cash Flow
+  // Balance Sheet (Snapshot at year end)
+  cash: number;
+  nwc: number; // Net Working Capital
+  ppe: number; // Net Property Plant Equipment
+  totalAssets: number;
+  totalDebt: number;
+  totalEquity: number;
 }
 
 export interface ValuationResult {
@@ -70,9 +83,13 @@ export interface Scenario {
     baseRevenue: number;
     revenueGrowth: number; // percentage
     cogsMargin: number; // percentage of revenue
-    opexMargin: number; // percentage of revenue
+    opexMargin: number; // percentage of revenue (excl D&A)
     taxRate: number; // percentage
     discountRate: number; // percentage
+    // New 3-Statement Drivers
+    nwcPercent: number; // Net Working Capital as % of Sales
+    capexPercent: number; // CapEx as % of Sales
+    depreciationPercent: number; // D&A as % of Sales (proxy)
   };
 }
 

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Plus, Trash2, Calculator, RefreshCw, Save, Copy, TrendingUp, TrendingDown, Layers, Download, Search, Loader2, Cloud, CloudOff } from 'lucide-react';
+import { Plus, Trash2, Calculator, RefreshCw, Save, Copy, TrendingUp, TrendingDown, Layers, Download, Search, Loader2, Cloud, CloudOff, FileText, Table } from 'lucide-react';
 import { CashFlowData, ValuationResult, Scenario } from '../../types';
 import { DEFAULT_SCENARIO, OPTIMISTIC_SCENARIO, PESSIMISTIC_SCENARIO } from '../../constants';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
@@ -22,6 +22,7 @@ export const ValuationTools: React.FC = () => {
   const [scenarios, setScenarios] = useState<Scenario[]>([DEFAULT_SCENARIO, OPTIMISTIC_SCENARIO, PESSIMISTIC_SCENARIO]);
   const [activeScenarioId, setActiveScenarioId] = useState<string>(DEFAULT_SCENARIO.id);
   const [projectionYears, setProjectionYears] = useState<number>(5);
+  const [activeTab, setActiveTab] = useState<'IS' | 'BS' | 'CF'>('IS');
   const [isLoaded, setIsLoaded] = useState(false);
   const [user, setUser] = useState<any>(null);
   const [isSaving, setIsSaving] = useState(false);
@@ -119,51 +120,98 @@ export const ValuationTools: React.FC = () => {
   // Helper to project cash flows based on drivers
   const calculateProjections = (scenario: Scenario): { flows: CashFlowData[], result: ValuationResult } => {
     const flows: CashFlowData[] = [];
-    const { baseRevenue, revenueGrowth, cogsMargin, opexMargin, taxRate, discountRate } = scenario.drivers;
+    const { 
+        baseRevenue, revenueGrowth, cogsMargin, opexMargin, taxRate, discountRate,
+        nwcPercent, capexPercent, depreciationPercent 
+    } = scenario.drivers;
     
-    // Year 0 (Initial Investment / Historical Base)
+    // Initial Balance Sheet Assumptions (Year 0)
+    // Simplified starting point to enable 3-statement logic
+    const startNWC = baseRevenue * ((nwcPercent || 10) / 100);
+    const startPPE = baseRevenue * 0.5;
+    const startCash = baseRevenue * 0.1;
+    const startDebt = baseRevenue * 0.2;
+    const startEquity = (startCash + startNWC + startPPE) - startDebt;
+
     flows.push({ 
         year: 0, 
         revenue: baseRevenue, 
         cogs: baseRevenue * (cogsMargin / 100), 
-        grossProfit: baseRevenue - (baseRevenue * (cogsMargin / 100)),
+        grossProfit: baseRevenue * (1 - cogsMargin / 100),
         opex: baseRevenue * (opexMargin / 100),
-        ebit: 0, // Placeholder
+        ebitda: 0, 
+        depreciation: 0,
+        ebit: 0, 
         tax: 0,
         netIncome: 0,
-        cashFlow: -(baseRevenue * 0.1) // Simplistic initial investment assumption
+        changeInNWC: 0,
+        capex: 0,
+        cashFlow: 0,
+        // BS Year 0
+        cash: startCash,
+        nwc: startNWC,
+        ppe: startPPE,
+        totalAssets: startCash + startNWC + startPPE,
+        totalDebt: startDebt,
+        totalEquity: startEquity
     });
 
-    let currentRevenue = baseRevenue;
+    let prevRev = baseRevenue;
+    let prevNWC = startNWC;
+    let prevPPE = startPPE;
+    let prevCash = startCash;
+    let prevEquity = startEquity;
+    // Debt assumed constant for unlevered model simplicity, or we could add paydown logic
+    let currentDebt = startDebt; 
 
     for (let i = 1; i <= projectionYears; i++) {
-        const rev = currentRevenue * (1 + (revenueGrowth / 100));
-        const cogs = rev * (cogsMargin / 100);
-        const grossProfit = rev - cogs;
-        const opex = rev * ((opexMargin || 20) / 100); // Default to 20% if undefined in old types
-        const ebit = grossProfit - opex; // Operating Income
-        
-        // Simple Tax
+        // Income Statement
+        const revenue = prevRev * (1 + (revenueGrowth / 100));
+        const cogs = revenue * (cogsMargin / 100);
+        const grossProfit = revenue - cogs;
+        const opex = revenue * ((opexMargin || 20) / 100); // Cash OpEx
+        const ebitda = grossProfit - opex;
+        const depreciation = revenue * ((depreciationPercent || 3) / 100);
+        const ebit = ebitda - depreciation;
         const tax = Math.max(0, ebit * (taxRate / 100));
         const netIncome = ebit - tax;
+
+        // Cash Flow Items
+        const nwc = revenue * ((nwcPercent || 10) / 100);
+        const changeInNWC = nwc - prevNWC;
+        const capex = revenue * ((capexPercent || 5) / 100);
         
-        // FCF Proxy (Net Income + D&A - CapEx - Change in Working Capital)
-        // For this high-level model, we'll assume FCF tracks Net Income closely or EBITDA proxy
-        // Let's use Net Income for simplicity in this 3-statement view
-        const fcf = netIncome; 
+        // Free Cash Flow (Unlevered)
+        // EBIT * (1-t) + D&A - CapEx - ChangeInNWC
+        // Or via Net Income: Net Income + Int(1-t) + D&A - CapEx - ChangeInNWC
+        // Assuming no interest for FCF calculation here (Unlevered)
+        const fcf = ebit * (1 - taxRate/100) + depreciation - capex - changeInNWC;
+        
+        // Balance Sheet Continuity
+        const ppe = prevPPE + capex - depreciation;
+        const equity = prevEquity + netIncome; // Retained Earnings acc
+        
+        // Cash Walk (Simplified): Cash_end = Cash_begin + NetIncome + D&A - ChangeNWC - CapEx 
+        // (Note: This is rough, assumes NetIncome is cash proxy aside from noted adjustments)
+        const cashFlowForBS = netIncome + depreciation - changeInNWC - capex; 
+        const cash = prevCash + cashFlowForBS;
 
         flows.push({
             year: i,
-            revenue: rev,
-            cogs,
-            grossProfit,
-            opex,
-            ebit,
-            tax,
-            netIncome,
-            cashFlow: fcf
+            revenue, cogs, grossProfit, opex, ebitda, depreciation, ebit, tax, netIncome,
+            changeInNWC, capex, cashFlow: fcf,
+            cash, nwc, ppe,
+            totalAssets: cash + nwc + ppe,
+            totalDebt: currentDebt,
+            totalEquity: equity
         });
-        currentRevenue = rev;
+
+        // Update for next iteration
+        prevRev = revenue;
+        prevNWC = nwc;
+        prevPPE = ppe;
+        prevCash = cash;
+        prevEquity = equity;
     }
 
     // Valuation Metrics
@@ -172,10 +220,15 @@ export const ValuationTools: React.FC = () => {
     flows.forEach(f => {
         if (f.year > 0) {
              npv += f.cashFlow / Math.pow(1 + rate, f.year);
-        } else {
-             npv += f.cashFlow; // Initial outflow
         }
     });
+
+    // Terminal Value (Gordon Growth)
+    const lastFCF = flows[flows.length-1].cashFlow;
+    const terminalGrowth = 0.02; // 2% perpetual
+    const terminalValue = (lastFCF * (1 + terminalGrowth)) / (rate - terminalGrowth);
+    const pvTerminalValue = terminalValue / Math.pow(1 + rate, projectionYears);
+    const totalEnterpriseValue = npv + pvTerminalValue;
 
     // IRR Approx
     let low = -0.99;
@@ -183,8 +236,8 @@ export const ValuationTools: React.FC = () => {
     let guess = 0.1;
     for(let i=0; i<50; i++) {
         guess = (low + high) / 2;
-        let npvGuess = 0;
-        flows.forEach(cf => npvGuess += cf.cashFlow / Math.pow(1+guess, cf.year));
+        let npvGuess = -flows[0].revenue * 2; // Initial investment proxy
+        flows.forEach(cf => { if(cf.year>0) npvGuess += cf.cashFlow / Math.pow(1+guess, cf.year) });
         if(Math.abs(npvGuess) < 100) break;
         if(npvGuess > 0) low = guess;
         else high = guess;
@@ -193,7 +246,7 @@ export const ValuationTools: React.FC = () => {
     return {
         flows,
         result: {
-            npv,
+            npv: totalEnterpriseValue,
             irr: guess * 100,
             paybackPeriod: 0 
         }
@@ -238,25 +291,18 @@ export const ValuationTools: React.FC = () => {
 
     try {
         validateTicker(tickerInput.toUpperCase());
-
         const financials = await FmpService.getIncomeStatement(tickerInput);
         if (!financials || financials.length < 2) {
             throw new Error("Insufficient financial data found for this ticker.");
         }
-
         const latest = financials[0];
         const previous = financials[1];
 
-        // Calculate Drivers based on actuals
         const baseRevenue = latest.revenue;
         const revenueGrowth = ((latest.revenue - previous.revenue) / previous.revenue) * 100;
         const cogsMargin = (latest.costOfRevenue / latest.revenue) * 100;
-        
-        // Approximate OpEx (Selling + G&A + R&D + Other)
-        const opexTotal = latest.revenue - latest.grossProfit - latest.netIncome; // Simplified back-calc or just use OpEx if API provides
-        const calculatedOpex = latest.grossProfit - (latest.incomeBeforeTax || latest.netIncome); // Rough proxy for OpEx
+        const calculatedOpex = latest.grossProfit - (latest.incomeBeforeTax || latest.netIncome); // Proxy
         const opexMargin = (calculatedOpex / latest.revenue) * 100;
-
         const taxRate = latest.incomeBeforeTax && latest.incomeBeforeTax !== 0 ? (latest.incomeTaxExpense / latest.incomeBeforeTax) * 100 : 21;
 
         const newId = `import-${tickerInput}-${Date.now()}`;
@@ -269,7 +315,10 @@ export const ValuationTools: React.FC = () => {
                 cogsMargin,
                 opexMargin: Math.max(0, opexMargin),
                 taxRate: Math.max(0, taxRate), 
-                discountRate: 9.5 
+                discountRate: 9.5,
+                nwcPercent: 5,
+                capexPercent: 5,
+                depreciationPercent: 4
             }
         };
 
@@ -284,13 +333,12 @@ export const ValuationTools: React.FC = () => {
     }
   };
 
-  // Compare all scenarios
   const comparisonData = useMemo(() => {
     return scenarios.map(s => {
         const { result } = calculateProjections(s);
         return {
             name: s.name,
-            NPV: Math.round(result.npv),
+            EV: Math.round(result.npv),
             IRR: parseFloat(result.irr.toFixed(1))
         };
     });
@@ -306,7 +354,7 @@ export const ValuationTools: React.FC = () => {
                     Financial Modeling
                 </h1>
                 <p className="text-slate-500 mt-1 flex items-center gap-2">
-                    Three-statement modeling and sensitivity analysis engine.
+                    3-Statement Modeling & Valuation Engine (IS, BS, CF)
                 </p>
             </div>
             
@@ -400,46 +448,30 @@ export const ValuationTools: React.FC = () => {
                         <h2 className="text-lg font-bold text-slate-800">Assumptions & Drivers</h2>
                     </div>
 
-                    <div className="space-y-5">
-                        <InputGroup 
-                            label="Base Revenue ($)" 
-                            value={activeScenario.drivers.baseRevenue} 
-                            onChange={(v) => updateDriver('baseRevenue', v)} 
-                            step={100000}
-                        />
-                         <InputGroup 
-                            label="Revenue Growth (%)" 
-                            value={activeScenario.drivers.revenueGrowth} 
-                            onChange={(v) => updateDriver('revenueGrowth', v)} 
-                            step={0.1}
-                            color="blue"
-                        />
-                         <InputGroup 
-                            label="COGS Margin (%)" 
-                            value={activeScenario.drivers.cogsMargin} 
-                            onChange={(v) => updateDriver('cogsMargin', v)} 
-                            step={0.5}
-                            color="rose"
-                        />
-                        <InputGroup 
-                            label="OpEx Margin (%)" 
-                            value={activeScenario.drivers.opexMargin || 20} 
-                            onChange={(v) => updateDriver('opexMargin', v)} 
-                            step={0.5}
-                            color="amber"
-                        />
-                         <InputGroup 
-                            label="Tax Rate (%)" 
-                            value={activeScenario.drivers.taxRate} 
-                            onChange={(v) => updateDriver('taxRate', v)} 
-                            step={0.5}
-                        />
-                         <InputGroup 
-                            label="Discount Rate / WACC (%)" 
-                            value={activeScenario.drivers.discountRate} 
-                            onChange={(v) => updateDriver('discountRate', v)} 
-                            step={0.1}
-                        />
+                    <div className="space-y-6 max-h-[600px] overflow-y-auto pr-2">
+                        <div className="space-y-4">
+                            <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider">Top Line</h3>
+                            <InputGroup label="Base Revenue ($)" value={activeScenario.drivers.baseRevenue} onChange={(v) => updateDriver('baseRevenue', v)} step={100000} />
+                            <InputGroup label="Revenue Growth (%)" value={activeScenario.drivers.revenueGrowth} onChange={(v) => updateDriver('revenueGrowth', v)} step={0.1} color="blue" />
+                        </div>
+                        
+                        <div className="space-y-4 pt-4 border-t border-slate-100">
+                            <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider">Margins & Ops</h3>
+                            <InputGroup label="COGS Margin (%)" value={activeScenario.drivers.cogsMargin} onChange={(v) => updateDriver('cogsMargin', v)} step={0.5} color="rose" />
+                            <InputGroup label="OpEx (SG&A) %" value={activeScenario.drivers.opexMargin || 20} onChange={(v) => updateDriver('opexMargin', v)} step={0.5} color="amber" />
+                            <InputGroup label="Tax Rate (%)" value={activeScenario.drivers.taxRate} onChange={(v) => updateDriver('taxRate', v)} step={0.5} />
+                        </div>
+
+                        <div className="space-y-4 pt-4 border-t border-slate-100">
+                             <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider">Balance Sheet Drivers</h3>
+                             <InputGroup label="Working Capital % Sales" value={activeScenario.drivers.nwcPercent || 10} onChange={(v) => updateDriver('nwcPercent', v)} step={0.5} color="purple" />
+                             <InputGroup label="CapEx % Sales" value={activeScenario.drivers.capexPercent || 5} onChange={(v) => updateDriver('capexPercent', v)} step={0.5} color="indigo" />
+                             <InputGroup label="D&A % Sales" value={activeScenario.drivers.depreciationPercent || 3} onChange={(v) => updateDriver('depreciationPercent', v)} step={0.1} color="cyan" />
+                        </div>
+                        
+                        <div className="pt-4 border-t border-slate-100">
+                             <InputGroup label="Discount Rate / WACC (%)" value={activeScenario.drivers.discountRate} onChange={(v) => updateDriver('discountRate', v)} step={0.1} />
+                        </div>
                     </div>
                 </div>
             </div>
@@ -450,84 +482,79 @@ export const ValuationTools: React.FC = () => {
                 {/* Key Metrics Cards */}
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div className="bg-slate-900 text-white p-5 rounded-xl shadow-lg">
-                        <p className="text-slate-400 text-xs font-medium uppercase mb-1">Scenario NPV</p>
-                        <div className={`text-2xl font-bold ${currentResult.npv >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                        <p className="text-slate-400 text-xs font-medium uppercase mb-1">Enterprise Value (TEV)</p>
+                        <div className="text-2xl font-bold text-emerald-400">
                             {formatLargeNumber(currentResult.npv)}
                         </div>
                     </div>
                     <div className="bg-white border border-slate-200 p-5 rounded-xl shadow-sm">
-                        <p className="text-slate-500 text-xs font-medium uppercase mb-1">Projected IRR</p>
-                        <div className={`text-2xl font-bold ${currentResult.irr > activeScenario.drivers.discountRate ? 'text-emerald-600' : 'text-amber-600'}`}>
-                            {currentResult.irr.toFixed(1)}%
+                        <p className="text-slate-500 text-xs font-medium uppercase mb-1">Exit EBITDA Margin</p>
+                        <div className="text-2xl font-bold text-blue-600">
+                           {(currentFlows[currentFlows.length-1].ebitda / currentFlows[currentFlows.length-1].revenue * 100).toFixed(1)}%
                         </div>
                     </div>
                     <div className="bg-white border border-slate-200 p-5 rounded-xl shadow-sm">
-                        <p className="text-slate-500 text-xs font-medium uppercase mb-1">EBIT Margin (Exit)</p>
-                        <div className="text-2xl font-bold text-blue-600">
-                           {(currentFlows[currentFlows.length-1].ebit / currentFlows[currentFlows.length-1].revenue * 100).toFixed(1)}%
-                        </div>
+                         <p className="text-slate-500 text-xs font-medium uppercase mb-1">Terminal FCF</p>
+                         <div className="text-2xl font-bold text-emerald-600">
+                            {formatLargeNumber(currentFlows[currentFlows.length-1].cashFlow)}
+                         </div>
                     </div>
                 </div>
 
-                {/* Detailed Cash Flow Table */}
-                <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-                    <div className="px-6 py-4 border-b border-slate-100 bg-slate-50 flex justify-between items-center">
-                        <h3 className="font-semibold text-slate-800">Pro Forma Income Statement</h3>
-                        <span className="text-xs text-slate-500 font-mono bg-slate-200 px-2 py-1 rounded">USD in millions</span>
+                {/* 3-Statement Tables */}
+                <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden min-h-[500px] flex flex-col">
+                    <div className="flex border-b border-slate-100">
+                        <TabButton active={activeTab === 'IS'} onClick={() => setActiveTab('IS')} label="Income Statement" icon={FileText} />
+                        <TabButton active={activeTab === 'BS'} onClick={() => setActiveTab('BS')} label="Balance Sheet" icon={Table} />
+                        <TabButton active={activeTab === 'CF'} onClick={() => setActiveTab('CF')} label="Cash Flow" icon={RefreshCw} />
                     </div>
-                    <div className="overflow-x-auto">
+                    
+                    <div className="overflow-x-auto flex-1">
                         <table className="w-full text-sm text-right">
-                            <thead className="bg-white text-slate-500 font-medium border-b border-slate-100">
+                            <thead className="bg-white text-slate-500 font-medium border-b border-slate-100 sticky top-0 z-10">
                                 <tr>
-                                    <th className="px-6 py-3 text-left w-48">Fiscal Year</th>
+                                    <th className="px-6 py-3 text-left w-48 bg-white">Fiscal Year</th>
                                     {currentFlows.filter(f => f.year > 0).map(f => (
                                         <th key={f.year} className="px-6 py-3 bg-slate-50/50">Year {f.year}</th>
                                     ))}
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-100">
-                                <tr>
-                                    <td className="px-6 py-3 text-left font-medium text-slate-900">Total Revenue</td>
-                                    {currentFlows.filter(f => f.year > 0).map(f => (
-                                        <td key={f.year} className="px-6 py-3 font-semibold text-slate-900">{formatLargeNumber(f.revenue)}</td>
-                                    ))}
-                                </tr>
-                                <tr>
-                                    <td className="px-6 py-3 text-left text-slate-600 pl-8">Cost of Goods Sold</td>
-                                    {currentFlows.filter(f => f.year > 0).map(f => (
-                                        <td key={f.year} className="px-6 py-3 text-slate-500">({formatLargeNumber(f.cogs)})</td>
-                                    ))}
-                                </tr>
-                                <tr className="bg-slate-50/30">
-                                    <td className="px-6 py-3 text-left font-bold text-slate-800">Gross Profit</td>
-                                    {currentFlows.filter(f => f.year > 0).map(f => (
-                                        <td key={f.year} className="px-6 py-3 font-medium text-slate-800">{formatLargeNumber(f.grossProfit)}</td>
-                                    ))}
-                                </tr>
-                                <tr>
-                                    <td className="px-6 py-3 text-left text-slate-600 pl-8">Operating Expenses</td>
-                                    {currentFlows.filter(f => f.year > 0).map(f => (
-                                        <td key={f.year} className="px-6 py-3 text-slate-500">({formatLargeNumber(f.opex)})</td>
-                                    ))}
-                                </tr>
-                                <tr className="bg-slate-50/30">
-                                    <td className="px-6 py-3 text-left font-bold text-slate-800">EBIT</td>
-                                    {currentFlows.filter(f => f.year > 0).map(f => (
-                                        <td key={f.year} className="px-6 py-3 font-medium text-slate-800">{formatLargeNumber(f.ebit)}</td>
-                                    ))}
-                                </tr>
-                                <tr>
-                                    <td className="px-6 py-3 text-left text-slate-600 pl-8">Income Tax</td>
-                                    {currentFlows.filter(f => f.year > 0).map(f => (
-                                        <td key={f.year} className="px-6 py-3 text-slate-500">({formatLargeNumber(f.tax)})</td>
-                                    ))}
-                                </tr>
-                                <tr className="bg-emerald-50/50">
-                                    <td className="px-6 py-3 text-left font-bold text-emerald-900">Net Income</td>
-                                    {currentFlows.filter(f => f.year > 0).map(f => (
-                                        <td key={f.year} className="px-6 py-3 font-bold text-emerald-700">{formatLargeNumber(f.netIncome)}</td>
-                                    ))}
-                                </tr>
+                                {activeTab === 'IS' && (
+                                    <>
+                                        <Row label="Total Revenue" values={currentFlows} field="revenue" bold />
+                                        <Row label="COGS" values={currentFlows} field="cogs" isNegative />
+                                        <Row label="Gross Profit" values={currentFlows} field="grossProfit" bold bg />
+                                        <Row label="OpEx (SG&A)" values={currentFlows} field="opex" isNegative />
+                                        <Row label="EBITDA" values={currentFlows} field="ebitda" bold />
+                                        <Row label="Depreciation & Amort." values={currentFlows} field="depreciation" isNegative />
+                                        <Row label="EBIT" values={currentFlows} field="ebit" bold bg />
+                                        <Row label="Income Tax" values={currentFlows} field="tax" isNegative />
+                                        <Row label="Net Income" values={currentFlows} field="netIncome" bold color="text-emerald-700" />
+                                    </>
+                                )}
+                                {activeTab === 'BS' && (
+                                    <>
+                                        <tr className="bg-slate-100"><td colSpan={10} className="px-6 py-1 text-left text-xs font-bold text-slate-500 uppercase">Assets</td></tr>
+                                        <Row label="Cash & Equivalents" values={currentFlows} field="cash" />
+                                        <Row label="Net Working Capital" values={currentFlows} field="nwc" />
+                                        <Row label="Net PP&E" values={currentFlows} field="ppe" />
+                                        <Row label="Total Assets" values={currentFlows} field="totalAssets" bold bg />
+                                        <tr className="bg-slate-100"><td colSpan={10} className="px-6 py-1 text-left text-xs font-bold text-slate-500 uppercase">Liabilities & Equity</td></tr>
+                                        <Row label="Total Debt" values={currentFlows} field="totalDebt" />
+                                        <Row label="Total Equity" values={currentFlows} field="totalEquity" />
+                                        <Row label="Total Liab. & Equity" values={currentFlows} field="totalAssets" bold bg />
+                                    </>
+                                )}
+                                {activeTab === 'CF' && (
+                                    <>
+                                        <Row label="Net Income" values={currentFlows} field="netIncome" bold />
+                                        <Row label="Plus: D&A" values={currentFlows} field="depreciation" />
+                                        <Row label="Less: Change in NWC" values={currentFlows} field="changeInNWC" isNegative />
+                                        <Row label="Less: CapEx" values={currentFlows} field="capex" isNegative />
+                                        <Row label="Unlevered Free Cash Flow" values={currentFlows} field="cashFlow" bold bg color="text-emerald-700" />
+                                    </>
+                                )}
                             </tbody>
                         </table>
                     </div>
@@ -535,7 +562,7 @@ export const ValuationTools: React.FC = () => {
 
                 {/* Scenario Comparison Chart */}
                 <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
-                    <h3 className="text-sm font-bold text-slate-500 uppercase tracking-wider mb-6">Scenario Sensitivity (NPV)</h3>
+                    <h3 className="text-sm font-bold text-slate-500 uppercase tracking-wider mb-6">Valuation Sensitivity (TEV)</h3>
                     <div className="h-64 w-full min-w-0">
                         <ResponsiveContainer width="100%" height="100%">
                             <BarChart data={comparisonData} layout="vertical" margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
@@ -547,7 +574,7 @@ export const ValuationTools: React.FC = () => {
                                     contentStyle={{ borderRadius: '8px', border: '1px solid #e2e8f0' }}
                                     formatter={(value: number) => formatLargeNumber(value)}
                                 />
-                                <Bar dataKey="NPV" fill="#10b981" radius={[0, 4, 4, 0]} barSize={30}>
+                                <Bar dataKey="EV" fill="#10b981" radius={[0, 4, 4, 0]} barSize={30}>
                                 </Bar>
                             </BarChart>
                         </ResponsiveContainer>
@@ -561,13 +588,38 @@ export const ValuationTools: React.FC = () => {
   );
 };
 
-// Subcomponent for cleaner inputs
+// Subcomponent for table rows
+const Row = ({ label, values, field, isNegative, bold, bg, color }: any) => (
+    <tr className={`${bg ? 'bg-slate-50/50' : ''}`}>
+        <td className={`px-6 py-3 text-left ${bold ? 'font-bold text-slate-800' : 'text-slate-600'} pl-${bold ? '6' : '8'}`}>{label}</td>
+        {values.filter((f: any) => f.year > 0).map((f: any) => (
+            <td key={f.year} className={`px-6 py-3 ${color || (bold ? 'text-slate-900' : 'text-slate-500')} ${bold ? 'font-semibold' : ''}`}>
+                {isNegative ? `(${formatLargeNumber(f[field])})` : formatLargeNumber(f[field])}
+            </td>
+        ))}
+    </tr>
+);
+
+const TabButton = ({ active, onClick, label, icon: Icon }: any) => (
+    <button
+        onClick={onClick}
+        className={`flex-1 flex items-center justify-center gap-2 py-3 text-sm font-medium transition-colors border-b-2 ${
+            active 
+            ? 'border-emerald-500 text-emerald-600 bg-emerald-50/30' 
+            : 'border-transparent text-slate-500 hover:text-slate-700 hover:bg-slate-50'
+        }`}
+    >
+        <Icon className="w-4 h-4" />
+        {label}
+    </button>
+);
+
 const InputGroup: React.FC<{ label: string; value: number; onChange: (val: number) => void; step: number; color?: string }> = ({ label, value, onChange, step, color = 'emerald' }) => {
     return (
         <div>
             <div className="flex justify-between mb-1">
-                <label className="text-sm font-medium text-slate-600">{label}</label>
-                <span className="text-sm font-bold text-slate-900">
+                <label className="text-xs font-medium text-slate-500">{label}</label>
+                <span className="text-xs font-bold text-slate-900">
                     {label.includes('Revenue') ? formatLargeNumber(value) : `${value.toFixed(1)}%`}
                 </span>
             </div>
@@ -578,7 +630,7 @@ const InputGroup: React.FC<{ label: string; value: number; onChange: (val: numbe
                 step={step}
                 value={value}
                 onChange={(e) => onChange(Number(e.target.value))}
-                className={`w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-${color}-600`}
+                className={`w-full h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-${color}-600`}
             />
         </div>
     );

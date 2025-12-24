@@ -42,6 +42,9 @@ export const DEFAULT_SCENARIO: Scenario = {
     opexMargin: 30,
     taxRate: 21,
     discountRate: 10,
+    nwcPercent: 10,
+    capexPercent: 5,
+    depreciationPercent: 3
   }
 };
 
@@ -55,6 +58,9 @@ export const OPTIMISTIC_SCENARIO: Scenario = {
     opexMargin: 25,
     taxRate: 21,
     discountRate: 10,
+    nwcPercent: 8,
+    capexPercent: 6,
+    depreciationPercent: 3
   }
 };
 
@@ -68,6 +74,9 @@ export const PESSIMISTIC_SCENARIO: Scenario = {
     opexMargin: 35,
     taxRate: 25,
     discountRate: 12,
+    nwcPercent: 12,
+    capexPercent: 3,
+    depreciationPercent: 4
   }
 };
 
