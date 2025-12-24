@@ -17,7 +17,10 @@
     "react-markdown": "^10.1.0",
     "@supabase/supabase-js": "2.39.3",
     "react-dropzone": "14.2.3",
-    "pdfjs-dist": "3.11.174"
+    "pdfjs-dist": "3.11.174",
+    "vite": "^7.3.0",
+    "@vitejs/plugin-react": "^5.1.2",
+    "path": "^0.12.7"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",

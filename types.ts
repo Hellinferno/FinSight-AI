@@ -1,3 +1,4 @@
+
 export interface FinancialMetric {
   label: string;
   value: number;
@@ -20,12 +21,20 @@ export interface ValuationResult {
   paybackPeriod: number;
 }
 
+// Add this new interface for chart data
+export interface VisualData {
+  type: 'bar' | 'line';
+  data: any[];
+  keys: string[];
+}
+
 export interface ChatMessage {
   id: string;
   role: 'user' | 'model';
   text: string;
   timestamp: Date;
   isError?: boolean;
+  visualData?: VisualData; // Stores chart configuration (type, data, keys)
 }
 
 export interface SearchResult {
