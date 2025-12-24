@@ -3,7 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 // Helper to safely access env vars without crashing if import.meta is not fully defined
 const getEnv = (key: string) => {
   try {
-    return import.meta.env?.[key] || '';
+    return (import.meta as any).env?.[key] || '';
   } catch (e) {
     return '';
   }

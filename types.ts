@@ -1,4 +1,5 @@
 
+
 export interface FinancialMetric {
   label: string;
   value: number;
@@ -11,7 +12,12 @@ export interface FinancialMetric {
 export interface CashFlowData {
   year: number;
   revenue: number;
-  expenses: number;
+  cogs: number;
+  grossProfit: number;
+  opex: number;
+  ebit: number;
+  tax: number;
+  netIncome: number;
   cashFlow: number;
 }
 
@@ -48,6 +54,7 @@ export interface ResearchResponse {
 }
 
 export enum AppView {
+  LANDING = 'LANDING',
   DASHBOARD = 'DASHBOARD',
   VALUATION = 'VALUATION',
   RESEARCH = 'RESEARCH',
@@ -63,6 +70,7 @@ export interface Scenario {
     baseRevenue: number;
     revenueGrowth: number; // percentage
     cogsMargin: number; // percentage of revenue
+    opexMargin: number; // percentage of revenue
     taxRate: number; // percentage
     discountRate: number; // percentage
   };

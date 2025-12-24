@@ -48,7 +48,6 @@ export const ValuationTools: React.FC = () => {
         try {
             const parsed = JSON.parse(saved);
             if (Array.isArray(parsed) && parsed.length > 0) {
-                // We keep defaults + local for now, cloud load will append/merge
                 setScenarios(parsed);
             }
         } catch (e) {
@@ -73,18 +72,13 @@ export const ValuationTools: React.FC = () => {
         .order('created_at', { ascending: true });
       
       if (data && data.length > 0) {
-          // Map DB format to App format
           const dbScenarios: Scenario[] = data.map((d: any) => ({
-              id: d.id, // Using UUID from DB
+              id: d.id, 
               name: d.name,
               drivers: d.drivers
           }));
           
           setScenarios(prev => {
-              // Simple merge strategy: Add cloud scenarios if they don't exist by ID
-              // Note: This might duplicate if ID schemes differ (UUID vs 'default'). 
-              // Ideally, you'd dedup by name or have a robust sync strategy.
-              // For Phase 2, we just append cloud scenarios to the list.
               const existingIds = new Set(prev.map(s => s.id));
               const newFromCloud = dbScenarios.filter(s => !existingIds.has(s.id));
               return [...prev, ...newFromCloud];
@@ -99,7 +93,6 @@ export const ValuationTools: React.FC = () => {
       }
       setIsSaving(true);
       
-      // We insert a new record for the current active scenario
       const { error } = await supabase
         .from('scenarios')
         .insert({
@@ -113,7 +106,6 @@ export const ValuationTools: React.FC = () => {
       if (error) {
           alert("Failed to save: " + error.message);
       } else {
-          // Ideally, we'd reload to get the real UUID, but for now just notify
           alert("Scenario saved to cloud successfully!");
           loadSavedScenarios(user.id); // Refresh list
       }
@@ -127,25 +119,48 @@ export const ValuationTools: React.FC = () => {
   // Helper to project cash flows based on drivers
   const calculateProjections = (scenario: Scenario): { flows: CashFlowData[], result: ValuationResult } => {
     const flows: CashFlowData[] = [];
-    const { baseRevenue, revenueGrowth, cogsMargin, taxRate, discountRate } = scenario.drivers;
+    const { baseRevenue, revenueGrowth, cogsMargin, opexMargin, taxRate, discountRate } = scenario.drivers;
     
-    // Year 0 (Initial Investment placeholder)
-    const initialInvestment = - (baseRevenue * 0.15); 
-    flows.push({ year: 0, revenue: 0, expenses: 0, cashFlow: initialInvestment });
+    // Year 0 (Initial Investment / Historical Base)
+    flows.push({ 
+        year: 0, 
+        revenue: baseRevenue, 
+        cogs: baseRevenue * (cogsMargin / 100), 
+        grossProfit: baseRevenue - (baseRevenue * (cogsMargin / 100)),
+        opex: baseRevenue * (opexMargin / 100),
+        ebit: 0, // Placeholder
+        tax: 0,
+        netIncome: 0,
+        cashFlow: -(baseRevenue * 0.1) // Simplistic initial investment assumption
+    });
 
     let currentRevenue = baseRevenue;
 
     for (let i = 1; i <= projectionYears; i++) {
         const rev = currentRevenue * (1 + (revenueGrowth / 100));
-        const exp = rev * (cogsMargin / 100);
-        const ebitda = rev - exp;
-        const tax = Math.max(0, ebitda * (taxRate / 100));
-        const fcf = ebitda - tax; // Simplified FCF
+        const cogs = rev * (cogsMargin / 100);
+        const grossProfit = rev - cogs;
+        const opex = rev * ((opexMargin || 20) / 100); // Default to 20% if undefined in old types
+        const ebit = grossProfit - opex; // Operating Income
+        
+        // Simple Tax
+        const tax = Math.max(0, ebit * (taxRate / 100));
+        const netIncome = ebit - tax;
+        
+        // FCF Proxy (Net Income + D&A - CapEx - Change in Working Capital)
+        // For this high-level model, we'll assume FCF tracks Net Income closely or EBITDA proxy
+        // Let's use Net Income for simplicity in this 3-statement view
+        const fcf = netIncome; 
 
         flows.push({
             year: i,
             revenue: rev,
-            expenses: exp,
+            cogs,
+            grossProfit,
+            opex,
+            ebit,
+            tax,
+            netIncome,
             cashFlow: fcf
         });
         currentRevenue = rev;
@@ -155,7 +170,11 @@ export const ValuationTools: React.FC = () => {
     let npv = 0;
     const rate = discountRate / 100;
     flows.forEach(f => {
-        npv += f.cashFlow / Math.pow(1 + rate, f.year);
+        if (f.year > 0) {
+             npv += f.cashFlow / Math.pow(1 + rate, f.year);
+        } else {
+             npv += f.cashFlow; // Initial outflow
+        }
     });
 
     // IRR Approx
@@ -176,7 +195,7 @@ export const ValuationTools: React.FC = () => {
         result: {
             npv,
             irr: guess * 100,
-            paybackPeriod: 0 // Not calculating for brevity
+            paybackPeriod: 0 
         }
     };
   };
@@ -218,7 +237,6 @@ export const ValuationTools: React.FC = () => {
     setImportError(null);
 
     try {
-        // Validate Ticker before fetch
         validateTicker(tickerInput.toUpperCase());
 
         const financials = await FmpService.getIncomeStatement(tickerInput);
@@ -229,11 +247,17 @@ export const ValuationTools: React.FC = () => {
         const latest = financials[0];
         const previous = financials[1];
 
-        // Calculate Drivers
+        // Calculate Drivers based on actuals
         const baseRevenue = latest.revenue;
         const revenueGrowth = ((latest.revenue - previous.revenue) / previous.revenue) * 100;
         const cogsMargin = (latest.costOfRevenue / latest.revenue) * 100;
-        const taxRate = latest.incomeBeforeTax !== 0 ? (latest.incomeTaxExpense / latest.incomeBeforeTax) * 100 : 21;
+        
+        // Approximate OpEx (Selling + G&A + R&D + Other)
+        const opexTotal = latest.revenue - latest.grossProfit - latest.netIncome; // Simplified back-calc or just use OpEx if API provides
+        const calculatedOpex = latest.grossProfit - (latest.incomeBeforeTax || latest.netIncome); // Rough proxy for OpEx
+        const opexMargin = (calculatedOpex / latest.revenue) * 100;
+
+        const taxRate = latest.incomeBeforeTax && latest.incomeBeforeTax !== 0 ? (latest.incomeTaxExpense / latest.incomeBeforeTax) * 100 : 21;
 
         const newId = `import-${tickerInput}-${Date.now()}`;
         const newScenario: Scenario = {
@@ -243,8 +267,9 @@ export const ValuationTools: React.FC = () => {
                 baseRevenue,
                 revenueGrowth,
                 cogsMargin,
-                taxRate: Math.max(0, taxRate), // Handle negative tax rate edge cases
-                discountRate: 9.5 // Default market rate
+                opexMargin: Math.max(0, opexMargin),
+                taxRate: Math.max(0, taxRate), 
+                discountRate: 9.5 
             }
         };
 
@@ -278,10 +303,10 @@ export const ValuationTools: React.FC = () => {
             <div>
                 <h1 className="text-3xl font-bold text-slate-900 flex items-center gap-2">
                     <Calculator className="w-8 h-8 text-emerald-600" />
-                    Scenario Planning & Valuation
+                    Financial Modeling
                 </h1>
                 <p className="text-slate-500 mt-1 flex items-center gap-2">
-                    {user ? <span className="text-emerald-600 flex items-center gap-1"><Cloud className="w-3 h-3"/> Cloud Sync Active</span> : <span className="text-slate-400 flex items-center gap-1"><CloudOff className="w-3 h-3"/> Local Mode (Sign in to sync)</span>}
+                    Three-statement modeling and sensitivity analysis engine.
                 </p>
             </div>
             
@@ -316,7 +341,7 @@ export const ValuationTools: React.FC = () => {
                     className="flex items-center gap-2 bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-emerald-700 disabled:opacity-50 disabled:bg-slate-400 transition-colors"
                 >
                     {isSaving ? <Loader2 className="w-4 h-4 animate-spin"/> : <Save className="w-4 h-4" />} 
-                    Save to Cloud
+                    Save
                 </button>
             </div>
         </header>
@@ -336,7 +361,7 @@ export const ValuationTools: React.FC = () => {
                 <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
                     <label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 flex justify-between">
                         <span>Active Scenario</span>
-                        <span className="text-emerald-600 flex items-center gap-1"><Save className="w-3 h-3"/> Auto-Saving (Local)</span>
+                        <span className="text-emerald-600 flex items-center gap-1"><Save className="w-3 h-3"/> Auto-Saving</span>
                     </label>
                     <div className="space-y-2 max-h-60 overflow-y-auto">
                         {scenarios.map(s => (
@@ -372,7 +397,7 @@ export const ValuationTools: React.FC = () => {
                 <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
                     <div className="flex items-center gap-2 mb-6">
                         <SettingsInput className="w-5 h-5 text-slate-500" />
-                        <h2 className="text-lg font-bold text-slate-800">Model Drivers</h2>
+                        <h2 className="text-lg font-bold text-slate-800">Assumptions & Drivers</h2>
                     </div>
 
                     <div className="space-y-5">
@@ -383,18 +408,25 @@ export const ValuationTools: React.FC = () => {
                             step={100000}
                         />
                          <InputGroup 
-                            label="Annual Growth Rate (%)" 
+                            label="Revenue Growth (%)" 
                             value={activeScenario.drivers.revenueGrowth} 
                             onChange={(v) => updateDriver('revenueGrowth', v)} 
                             step={0.1}
                             color="blue"
                         />
                          <InputGroup 
-                            label="COGS / Expense Margin (%)" 
+                            label="COGS Margin (%)" 
                             value={activeScenario.drivers.cogsMargin} 
                             onChange={(v) => updateDriver('cogsMargin', v)} 
                             step={0.5}
                             color="rose"
+                        />
+                        <InputGroup 
+                            label="OpEx Margin (%)" 
+                            value={activeScenario.drivers.opexMargin || 20} 
+                            onChange={(v) => updateDriver('opexMargin', v)} 
+                            step={0.5}
+                            color="amber"
                         />
                          <InputGroup 
                             label="Tax Rate (%)" 
@@ -424,22 +456,86 @@ export const ValuationTools: React.FC = () => {
                         </div>
                     </div>
                     <div className="bg-white border border-slate-200 p-5 rounded-xl shadow-sm">
-                        <p className="text-slate-500 text-xs font-medium uppercase mb-1">IRR</p>
+                        <p className="text-slate-500 text-xs font-medium uppercase mb-1">Projected IRR</p>
                         <div className={`text-2xl font-bold ${currentResult.irr > activeScenario.drivers.discountRate ? 'text-emerald-600' : 'text-amber-600'}`}>
                             {currentResult.irr.toFixed(1)}%
                         </div>
                     </div>
                     <div className="bg-white border border-slate-200 p-5 rounded-xl shadow-sm">
-                        <p className="text-slate-500 text-xs font-medium uppercase mb-1">5-Yr Revenue CAGR</p>
+                        <p className="text-slate-500 text-xs font-medium uppercase mb-1">EBIT Margin (Exit)</p>
                         <div className="text-2xl font-bold text-blue-600">
-                           {activeScenario.drivers.revenueGrowth.toFixed(1)}%
+                           {(currentFlows[currentFlows.length-1].ebit / currentFlows[currentFlows.length-1].revenue * 100).toFixed(1)}%
                         </div>
+                    </div>
+                </div>
+
+                {/* Detailed Cash Flow Table */}
+                <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                    <div className="px-6 py-4 border-b border-slate-100 bg-slate-50 flex justify-between items-center">
+                        <h3 className="font-semibold text-slate-800">Pro Forma Income Statement</h3>
+                        <span className="text-xs text-slate-500 font-mono bg-slate-200 px-2 py-1 rounded">USD in millions</span>
+                    </div>
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-sm text-right">
+                            <thead className="bg-white text-slate-500 font-medium border-b border-slate-100">
+                                <tr>
+                                    <th className="px-6 py-3 text-left w-48">Fiscal Year</th>
+                                    {currentFlows.filter(f => f.year > 0).map(f => (
+                                        <th key={f.year} className="px-6 py-3 bg-slate-50/50">Year {f.year}</th>
+                                    ))}
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100">
+                                <tr>
+                                    <td className="px-6 py-3 text-left font-medium text-slate-900">Total Revenue</td>
+                                    {currentFlows.filter(f => f.year > 0).map(f => (
+                                        <td key={f.year} className="px-6 py-3 font-semibold text-slate-900">{formatLargeNumber(f.revenue)}</td>
+                                    ))}
+                                </tr>
+                                <tr>
+                                    <td className="px-6 py-3 text-left text-slate-600 pl-8">Cost of Goods Sold</td>
+                                    {currentFlows.filter(f => f.year > 0).map(f => (
+                                        <td key={f.year} className="px-6 py-3 text-slate-500">({formatLargeNumber(f.cogs)})</td>
+                                    ))}
+                                </tr>
+                                <tr className="bg-slate-50/30">
+                                    <td className="px-6 py-3 text-left font-bold text-slate-800">Gross Profit</td>
+                                    {currentFlows.filter(f => f.year > 0).map(f => (
+                                        <td key={f.year} className="px-6 py-3 font-medium text-slate-800">{formatLargeNumber(f.grossProfit)}</td>
+                                    ))}
+                                </tr>
+                                <tr>
+                                    <td className="px-6 py-3 text-left text-slate-600 pl-8">Operating Expenses</td>
+                                    {currentFlows.filter(f => f.year > 0).map(f => (
+                                        <td key={f.year} className="px-6 py-3 text-slate-500">({formatLargeNumber(f.opex)})</td>
+                                    ))}
+                                </tr>
+                                <tr className="bg-slate-50/30">
+                                    <td className="px-6 py-3 text-left font-bold text-slate-800">EBIT</td>
+                                    {currentFlows.filter(f => f.year > 0).map(f => (
+                                        <td key={f.year} className="px-6 py-3 font-medium text-slate-800">{formatLargeNumber(f.ebit)}</td>
+                                    ))}
+                                </tr>
+                                <tr>
+                                    <td className="px-6 py-3 text-left text-slate-600 pl-8">Income Tax</td>
+                                    {currentFlows.filter(f => f.year > 0).map(f => (
+                                        <td key={f.year} className="px-6 py-3 text-slate-500">({formatLargeNumber(f.tax)})</td>
+                                    ))}
+                                </tr>
+                                <tr className="bg-emerald-50/50">
+                                    <td className="px-6 py-3 text-left font-bold text-emerald-900">Net Income</td>
+                                    {currentFlows.filter(f => f.year > 0).map(f => (
+                                        <td key={f.year} className="px-6 py-3 font-bold text-emerald-700">{formatLargeNumber(f.netIncome)}</td>
+                                    ))}
+                                </tr>
+                            </tbody>
+                        </table>
                     </div>
                 </div>
 
                 {/* Scenario Comparison Chart */}
                 <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
-                    <h3 className="text-sm font-bold text-slate-500 uppercase tracking-wider mb-6">Scenario Sensitivity Analysis (NPV Comparison)</h3>
+                    <h3 className="text-sm font-bold text-slate-500 uppercase tracking-wider mb-6">Scenario Sensitivity (NPV)</h3>
                     <div className="h-64 w-full min-w-0">
                         <ResponsiveContainer width="100%" height="100%">
                             <BarChart data={comparisonData} layout="vertical" margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
@@ -455,45 +551,6 @@ export const ValuationTools: React.FC = () => {
                                 </Bar>
                             </BarChart>
                         </ResponsiveContainer>
-                    </div>
-                </div>
-
-                {/* Detailed Cash Flow Table */}
-                <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-                    <div className="px-6 py-4 border-b border-slate-100 bg-slate-50">
-                        <h3 className="font-semibold text-slate-800">Projected Financials - {activeScenario.name}</h3>
-                    </div>
-                    <div className="overflow-x-auto">
-                        <table className="w-full text-sm text-right">
-                            <thead className="bg-white text-slate-500 font-medium">
-                                <tr>
-                                    <th className="px-6 py-3 text-left">Line Item</th>
-                                    {currentFlows.filter(f => f.year > 0).map(f => (
-                                        <th key={f.year} className="px-6 py-3">Year {f.year}</th>
-                                    ))}
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y divide-slate-100">
-                                <tr>
-                                    <td className="px-6 py-3 text-left font-medium text-slate-900">Revenue</td>
-                                    {currentFlows.filter(f => f.year > 0).map(f => (
-                                        <td key={f.year} className="px-6 py-3">{formatLargeNumber(f.revenue)}</td>
-                                    ))}
-                                </tr>
-                                <tr>
-                                    <td className="px-6 py-3 text-left font-medium text-slate-900">Expenses (COGS)</td>
-                                    {currentFlows.filter(f => f.year > 0).map(f => (
-                                        <td key={f.year} className="px-6 py-3 text-rose-600">({formatLargeNumber(f.expenses)})</td>
-                                    ))}
-                                </tr>
-                                <tr className="bg-slate-50">
-                                    <td className="px-6 py-3 text-left font-bold text-slate-900">Free Cash Flow</td>
-                                    {currentFlows.filter(f => f.year > 0).map(f => (
-                                        <td key={f.year} className="px-6 py-3 font-bold text-emerald-600">{formatLargeNumber(f.cashFlow)}</td>
-                                    ))}
-                                </tr>
-                            </tbody>
-                        </table>
                     </div>
                 </div>
 

@@ -2,7 +2,7 @@ import { handleAPIError, APIError } from '../utils/errorHandler';
 import { supabase } from '../lib/supabaseClient';
 
 // Safely access environment variables
-const API_KEY = import.meta.env?.VITE_FMP_API_KEY;
+const API_KEY = (import.meta as any).env?.VITE_FMP_API_KEY;
 const BASE_URL = 'https://financialmodelingprep.com/api/v3';
 
 // MOCK DATA FOR DEMO/FALLBACK (When API Key is missing)

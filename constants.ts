@@ -1,3 +1,4 @@
+
 import { CashFlowData, Scenario } from './types';
 
 // Dashboard Mock Data
@@ -38,6 +39,7 @@ export const DEFAULT_SCENARIO: Scenario = {
     baseRevenue: 1000000,
     revenueGrowth: 5,
     cogsMargin: 40,
+    opexMargin: 30,
     taxRate: 21,
     discountRate: 10,
   }
@@ -50,6 +52,7 @@ export const OPTIMISTIC_SCENARIO: Scenario = {
     baseRevenue: 1000000,
     revenueGrowth: 12,
     cogsMargin: 35,
+    opexMargin: 25,
     taxRate: 21,
     discountRate: 10,
   }
@@ -62,6 +65,7 @@ export const PESSIMISTIC_SCENARIO: Scenario = {
     baseRevenue: 1000000,
     revenueGrowth: -2,
     cogsMargin: 55,
+    opexMargin: 35,
     taxRate: 25,
     discountRate: 12,
   }
